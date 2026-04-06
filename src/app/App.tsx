@@ -8,7 +8,6 @@ import { OutcomeEngine } from '../engine/outcomeRules';
 import { useSpeechInput } from '../hooks/useSpeechInput';
 import { ResumeCard } from '../features/session/ResumeCard';
 import { PostSessionFeedback } from '../features/feedback/PostSessionFeedback';
-import { askLLM } from '../../server/llm/client';
 import { DebugPanel } from '../dev/DebugPanel';
 import './index.css';
 
@@ -42,14 +41,32 @@ export default function App() {
     // 2. Conductor decides next move
     const nextMove = ConductorEngine.decideNextMove(state, intent as any);
     
-    // 3. Ask LLM live Endpoint
-    const response = await askLLM({
-      internalState: state,
-      userResponse: finalUserText,
-      userIntent: intent as any,
-      forcedNextMove: nextMove,
-      inputType: mode === 'conversation' ? (transcript !== finalUserText ? 'corrected_transcript' : 'transcribed') : 'typed'
-    });
+    // 3. Ask LLM live Endpoint via local server boundary
+    let response;
+    try {
+      const apiReq = await fetch('/api/llm', {
+         method: 'POST',
+         headers: { 'Content-Type': 'application/json' },
+         body: JSON.stringify({
+            internalState: state,
+            userResponse: finalUserText,
+            userIntent: intent,
+            forcedNextMove: nextMove,
+            inputType: mode === 'conversation' ? (transcript !== finalUserText ? 'corrected_transcript' : 'transcribed') : 'typed'
+         })
+      });
+      if (!apiReq.ok) throw new Error('Proxy call failed.');
+      response = await apiReq.json();
+    } catch (e: any) {
+      console.error(e);
+      // Fallback rescue structure if proxy dies entirely
+      response = { 
+         nextMoveType: nextMove, 
+         userFacingText: '[Mock Fallback de Emergência API]', 
+         extractedSignals: { contexts: [], costs: [], fears: [], mechanisms: [] },
+         suggestedUpdates: { confidenceHint: 'insufficient' }
+      };
+    }
     
     // 4. Update the real state and commit transcript block
     const updatedHistory = [...state.transcriptHistory, 
