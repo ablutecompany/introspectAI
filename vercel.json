@@ -1,7 +1,6 @@
 {
-  "name": "introspect-ai",
   "functions": {
-    "api/llm.ts": {
+    "api/**/*.ts": {
       "maxDuration": 60
     }
   }
