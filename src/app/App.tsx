@@ -1,4 +1,4 @@
-import { useState } from 'react';
+import { useState, useEffect } from 'react';
 import { useSessionStore } from '../store/useSessionStore';
 import { ConductorEngine } from '../engine/conductor';
 import { StateUpdater } from '../engine/updateState';
@@ -6,6 +6,7 @@ import { InputClassifier } from '../engine/classifyInput';
 import type { UserIntent } from '../engine/classifyInput';
 import { OutcomeEngine } from '../engine/outcomeRules';
 import { useSpeechInput } from '../hooks/useSpeechInput';
+import { useTTS } from '../hooks/useTTS';
 import { ResumeCard } from '../features/session/ResumeCard';
 import { PostSessionFeedback } from '../features/feedback/PostSessionFeedback';
 import { DebugPanel } from '../dev/DebugPanel';
@@ -14,11 +15,20 @@ import './index.css';
 export default function App() {
   const { mode, setMode, phase, turnIndex, updateState, incrementTurn, resetSession } = useSessionStore();
   const { isListening, transcript, toggleListening, manualSetTranscript, error: sttError, isSupported } = useSpeechInput();
+  const { speak, stop: stopTTS, isSpeaking } = useTTS();
   
   const [currentQuestion, setCurrentQuestion] = useState("O que te trouxe aqui hoje? Onde sentes que está o peso maior?");
   const [inputText, setInputText] = useState("");
   const [isProcessing, setIsProcessing] = useState(false);
   const [isResuming, setIsResuming] = useState(true); // Control flow flag for early intercepts
+  const [showTranscriptInput, setShowTranscriptInput] = useState(false);
+
+  // Trigger TTS on new question if conversation mode
+  useEffect(() => {
+     if (mode === 'conversation' && currentQuestion) {
+        speak(currentQuestion);
+     }
+  }, [currentQuestion, mode, speak]);
 
   const startSession = (selectedMode: 'conversation' | 'writing') => {
     setMode(selectedMode);
@@ -82,8 +92,13 @@ export default function App() {
     setCurrentQuestion(response.userFacingText);
     setInputText("");
     manualSetTranscript(""); // Reseta a transcrição após o envio
+    setShowTranscriptInput(false);
     incrementTurn();
     setIsProcessing(false);
+  };
+
+  const handleInterruptSpeaking = () => {
+     stopTTS();
   };
 
   const state = useSessionStore.getState();
@@ -189,65 +204,96 @@ export default function App() {
                 disabled={isProcessing}
               />
             ) : (
-              <div className="audio-live-container" style={{ display: 'flex', flexDirection: 'column', gap: 12 }}>
-                {!isSupported && <div style={{ color: '#f00', fontSize: 12 }}>Microfone não suportado pelo browser. Usa Escrita.</div>}
+              <div className="audio-live-container" style={{ display: 'flex', flexDirection: 'column', gap: 24, alignItems: 'center' }}>
+                {!isSupported && <div style={{ color: '#ef4444', fontSize: '0.8rem', textAlign: 'center' }}>Aviso: Microfone indisponível. Recorrendo apenas aos botões e reencaminhando fluxo.</div>}
                 
-                <div style={{ display: 'flex', alignItems: 'center', gap: 12 }}>
+                {isSpeaking && (
+                   <button onClick={handleInterruptSpeaking} style={{ background: '#f8fafc', border: '1px solid #cbd5e1', color: '#64748b', padding: '6px 12px', borderRadius: '16px', fontSize: '0.8rem', cursor: 'pointer' }}>
+                      Pausar leitura de IA ◼
+                   </button>
+                )}
+
+                {/* Big Mic Button Focus */}
+                <div style={{ padding: '32px 0' }}>
                    <button 
                      onClick={toggleListening} 
-                     disabled={!isSupported || isProcessing}
+                     disabled={!isSupported || isProcessing || isSpeaking}
                      style={{
-                        padding: '12px 24px', 
-                        borderRadius: 30, 
-                        border: 'none', 
-                        background: isListening ? '#ef4444' : '#fff',
-                        color: isListening ? '#fff' : '#000',
-                        cursor: 'pointer',
-                        fontWeight: 'bold',
-                        transition: '0.2s all'
+                        width: '100px',
+                        height: '100px',
+                        borderRadius: '50%', 
+                        border: isListening ? '6px solid #fecaca' : 'none', 
+                        background: isListening ? '#ef4444' : '#0f172a',
+                        color: '#fff',
+                        cursor: (isSupported && !isSpeaking) ? 'pointer' : 'not-allowed',
+                        boxShadow: isListening ? '0 0 24px rgba(239, 68, 68, 0.4)' : '0 8px 16px rgba(15, 23, 42, 0.2)',
+                        transition: '0.2s all',
+                        display: 'flex',
+                        flexDirection: 'column',
+                        alignItems: 'center',
+                        justifyContent: 'center',
+                        opacity: isSpeaking ? 0.3 : 1
                      }}
                    >
-                      {isListening ? 'A ouvir... (Clique para parar)' : 'Falar'}
+                     <span style={{ fontSize: '2rem' }}>{isListening ? '🎙️' : '🎙'}</span>
                    </button>
-                   {sttError && <span style={{color: '#ef4444', fontSize: 12}}>{sttError}</span>}
+                   <div style={{ textAlign: 'center', marginTop: '16px', color: isListening ? '#ef4444' : '#64748b', fontWeight: isListening ? 'bold' : 'normal' }}>
+                      {isListening ? 'Podes falar...' : 'Toca para Falar'}
+                   </div>
+                   {sttError && <div style={{color: '#ef4444', fontSize: 12, marginTop: 8, textAlign:'center'}}>{sttError}</div>}
                 </div>
-
-                {/* Edit STT text directly before submit */}
-                <textarea
-                  value={transcript}
-                  onChange={(e) => manualSetTranscript(e.target.value)}
-                  placeholder="A tua voz aparecerá aqui..."
-                  disabled={isProcessing || isListening}
-                  style={{ minHeight: 80 }}
-                />
+                
+                {/* Visual support and manual edit toggle */}
+                {transcript && (
+                   <div style={{ width: '100%', background: '#f8fafc', padding: '16px', borderRadius: '8px', border: '1px solid #e2e8f0' }}>
+                      <p style={{ margin: 0, fontSize: '0.9rem', color: '#334155', fontStyle: 'italic' }}>"{transcript}"</p>
+                      {!showTranscriptInput && (
+                         <div style={{ textAlign: 'right', marginTop: '8px' }}>
+                            <button onClick={() => setShowTranscriptInput(true)} style={{ background: 'transparent', border: 'none', color: '#3b82f6', fontSize: '0.8rem', cursor: 'pointer', textDecoration: 'underline' }}>
+                               Corrigir texto transcrito
+                            </button>
+                         </div>
+                      )}
+                      
+                      {showTranscriptInput && (
+                         <textarea
+                           value={transcript}
+                           onChange={(e) => manualSetTranscript(e.target.value)}
+                           disabled={isProcessing || isListening}
+                           style={{ minHeight: 60, marginTop: '12px', fontSize: '0.85rem' }}
+                         />
+                      )}
+                   </div>
+                )}
+                
+                {/* Voice-First Chips Sub-Layer */}
+                <div style={{ display: 'flex', gap: '8px', flexWrap: 'wrap', justifyContent: 'center', width: '100%', marginTop: '12px' }}>
+                    {['Sim', 'Não', 'Mais ou menos'].map(txt => (
+                       <button key={txt} onClick={() => { manualSetTranscript(txt); handleUserSubmit('substantive'); }} disabled={isProcessing || isSpeaking} style={{ padding: '8px 16px', background: '#e2e8f0', color: '#334155', border: 'none', borderRadius: '24px', cursor: 'pointer', fontSize: '0.85rem' }}>
+                          {txt}
+                       </button>
+                    ))}
+                    <button onClick={() => handleUserSubmit('simplify_request')} disabled={isProcessing || isSpeaking} style={{ padding: '8px 16px', background: '#ffe4e6', color: '#be123c', border: 'none', borderRadius: '24px', cursor: 'pointer', fontSize: '0.85rem' }}>
+                       Explica-me melhor
+                    </button>
+                    <button onClick={() => handleUserSubmit('dont_know')} disabled={isProcessing || isSpeaking} style={{ padding: '8px 16px', background: '#f1f5f9', color: '#475569', border: 'none', borderRadius: '24px', cursor: 'pointer', fontSize: '0.85rem' }}>
+                       Não sei
+                    </button>
+                </div>
               </div>
             )}
 
-            <div className="controls">
-              <div className="secondary-actions">
-                <button 
-                  onClick={() => handleUserSubmit('dont_know')}
-                  disabled={isProcessing}
-                  className="btn-secondary"
-                >
-                  Não sei
-                </button>
-                <button 
-                  onClick={() => handleUserSubmit('not_me_request')}
-                  disabled={isProcessing}
-                  className="btn-secondary"
-                >
-                  Não é bem isso
-                </button>
-                <button 
-                  onClick={() => handleUserSubmit('simplify_request')}
-                  disabled={isProcessing}
-                  className="btn-secondary"
-                >
-                  Explica melhor
-                </button>
+            {mode === 'writing' && (
+              <div className="controls">
+                <div className="secondary-actions">
+                  <button onClick={() => handleUserSubmit('dont_know')} disabled={isProcessing} className="btn-secondary">Não sei</button>
+                  <button onClick={() => handleUserSubmit('not_me_request')} disabled={isProcessing} className="btn-secondary">Não é bem isso</button>
+                  <button onClick={() => handleUserSubmit('simplify_request')} disabled={isProcessing} className="btn-secondary">Explica melhor</button>
+                </div>
               </div>
+            )}
 
+            <div className="controls" style={{ marginTop: '24px' }}>
               <button 
                 onClick={() => {
                   if (state.phase === 'closure_ready') {
@@ -258,8 +304,9 @@ export default function App() {
                 }}
                 disabled={isProcessing || (mode === 'writing' && !inputText.trim() && state.phase !== 'closure_ready') || (mode === 'conversation' && !transcript.trim() && state.phase !== 'closure_ready')}
                 className="btn-primary"
+                style={{ width: mode === 'conversation' ? '100%' : 'auto', padding: mode === 'conversation' ? '16px' : undefined }}
               >
-                {state.phase === 'closure_ready' ? 'Ver Leitura' : isProcessing ? '...' : 'Continuar'}
+                {state.phase === 'closure_ready' ? 'Ver Leitura Final' : isProcessing ? '...' : (mode === 'conversation' ? 'Avançar com a Transcrição' : 'Continuar')}
               </button>
             </div>
             
