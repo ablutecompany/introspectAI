@@ -1,10 +1,11 @@
 import type { InternalState } from '../types/internalState';
 import type { LLMNextMoveType } from '../../shared/contracts/interviewContract';
+import type { UserIntent } from './classifyInput';
 
 export class ConductorEngine {
   static decideNextMove(
     state: InternalState, 
-    userIntent: 'vague' | 'deflective' | 'substantive' | 'dont_know'
+    userIntent: UserIntent
   ): LLMNextMoveType {
     
     // 1. Friction & Deflection Handlers

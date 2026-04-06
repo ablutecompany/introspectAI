@@ -4,6 +4,7 @@ import { ConductorEngine } from '../engine/conductor';
 import { StateUpdater } from '../engine/updateState';
 import { OutcomeEngine } from '../engine/outcomeRules';
 import { EcosystemMapper } from '../engine/ecosystemProfile';
+import { askLLM } from '../../server/llm/client';
 import type { InternalState } from '../types/internalState';
 
 const makeInitialState = (): InternalState => ({
@@ -43,29 +44,6 @@ const makeInitialState = (): InternalState => ({
   keyUserPhrases: [],
 });
 
-// A dummy LLM Mock just for the runner
-const simpleLLMMock = (text: string, turn: number) => {
-  const signalMatch = (keywords: string[], sigType: string[]) => 
-    keywords.some(k => text.toLowerCase().includes(k)) ? sigType : [];
-
-  const costs = signalMatch(['esgotada', 'cansa', 'saúde', 'alegria', 'dor', 'stress'], ['Cansaço Percecionado']);
-  const fears = signalMatch(['medo', 'receio', 'falhar', 'perder'], ['Medo de Colapso']);
-  const mechanisms = signalMatch(['suportar', 'finjo', 'séries', 'evitar', 'isolo'], ['Evitamento Defensivo']);
-  const contexts = signalMatch(['trabalho', 'casa', 'relação', 'casamento'], ['Ambiente Doméstico/Profissional']);
-  
-  const dominant = turn > 1 ? 'Sobrecarga Sistémica' : null;
-
-  return {
-    nextMoveType: 'ask_open' as any,
-    userFacingText: 'mock text',
-    extractedSignals: { contexts, costs, fears, mechanisms },
-    suggestedUpdates: {
-      dominantHypothesis: dominant || undefined,
-      confidenceHint: turn >= 4 ? 'strong' : turn > 1 ? 'moderate' : 'insufficient' as any
-    }
-  };
-};
-
 export async function runMockSessions() {
   for (const [key, session] of Object.entries(MOCK_SESSIONS)) {
     console.log(`\n======================================================`);
@@ -83,11 +61,16 @@ export async function runMockSessions() {
         console.log(`   -> INTENT: ${intent}`);
 
         // 2. Conductor Pick
-        const nextMove = ConductorEngine.decideNextMove(currentState, intent);
+        const nextMove = ConductorEngine.decideNextMove(currentState, intent as any);
         console.log(`   -> CONDUTOR DITA: ${nextMove}`);
 
-        // 3. Fake API Call
-        const llmMock = simpleLLMMock(turnText, i);
+        // 3. Fake API Call replaced with actual API logic using schemas and constraints
+        const llmMock = await askLLM({
+           internalState: currentState,
+           userResponse: turnText,
+           userIntent: intent,
+           forcedNextMove: nextMove
+        });
 
         // 4. Update Engine
         const updates = StateUpdater.enrich(currentState, intent, llmMock);

@@ -43,15 +43,18 @@ export const MOCK_SESSIONS = {
     ]
   },
   E: {
-    description: 'E. Caso com hipótese rival real a contrastar',
+    description: 'E. Teste Zod Fallback 1: Input MOCK_LLM_FAIL quebra Schema na Fase Explore',
     turns: [
-      'Sinto uma pressão no peito enorme no trabalho.',
-      'O meu chefe exige imenso, estou no limite.',
-      'Levo o stress para casa e isolo-me da família.', // Cost & Mechanism
-      'Às vezes penso que talvez o problema nem seja o trabalho, mas a minha relação em casa.', // Rival Hypothesis hint
-      'Afinal, tento manter-me no trabalho para evitar o ambiente de casa.', // Contrast clarity
-      'Tenho receio de admitir que o casamento falhou.', // Fear
-      'Queria paz ao abrir a porta de casa.' // Desired Life
+      'A minha exaustão fala mais alto no fim de dia.',
+      'Sinto que tenho que pedir MOCK_LLM_FAIL para testar a robustez em falha profunda.',
+      'Não sei o que fazer. Quero ver o fallback de simplify.', // Intent vaguely simplify
+    ]
+  },
+  F: {
+    description: 'F. Teste Zod Fallback 2: Input MOCK_LLM_FAIL afeta Deliver Outcome Base',
+    turns: [
+      'Tenho as defesas em cima para MOCK_LLM_FAIL e quebrar o parse quando tento aceder à resposta.',
+      'Test fail.'
     ]
   }
 };

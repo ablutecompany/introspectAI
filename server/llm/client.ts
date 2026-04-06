@@ -1,20 +1,34 @@
 import type { AskLLMRequest, LLMInterviewResponse } from '../../shared/contracts/interviewContract';
+import { PromptBuilder } from './promptBuilder';
+import { ProviderAdapter } from './providerAdapter';
+import { LLMGuard } from './guards';
 
 export async function askLLM(request: AskLLMRequest): Promise<LLMInterviewResponse> {
-  // In a real implementation, we would construct a prompt with `request.internalState` 
-  // and send it via OpenAI/Anthropic API, validating the JSON response via zod logic.
+  const startTime = Date.now();
   
-  console.log(`[LLM MOCK] Received request, move logic focus: ${request.forcedNextMove}`);
+  // 1. Conductor mandates next move
+  const forcedMove = request.forcedNextMove || 'ask_open';
   
-  // Fake response for the MVP wiring
-  return {
-    nextMoveType: request.forcedNextMove || 'ask_open',
-    userFacingText: "Isto é uma resposta gerada simulada. Percebo o que dizes. Para não nos perdermos: isto pesa-te mais como falta de margem ou como cansaço?",
-    extractedSignals: {
-        contexts: ['cansaço percecionado']
-    },
-    suggestedUpdates: {
-        confidenceHint: 'moderate'
-    }
-  };
+  // 2. Build explicit locked prompt
+  const { system, user } = PromptBuilder.build(request.internalState, request.userResponse, forcedMove);
+  
+  // 3. Ask provider
+  let rawText = '';
+  try {
+     rawText = await ProviderAdapter.requestOpenAI(system, user);
+  } catch (e: any) {
+     rawText = `{"error": "API Unreachable", "details": "${e.message}"}`; // Generates a Zod fail purposely if no catch configured
+  }
+
+  const latency = Date.now() - startTime;
+
+  // 4. Validate through Zod constraints and apply Schema/Fallback overrides
+  const finalResponse = LLMGuard.validate(rawText, forcedMove, {
+     sessionId: request.internalState.sessionId,
+     turnIndex: request.internalState.turnIndex,
+     phase: request.internalState.phase,
+     latency
+  });
+
+  return finalResponse;
 }
