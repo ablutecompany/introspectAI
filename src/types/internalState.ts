@@ -12,6 +12,10 @@ export type ConfidenceLevel = 'insufficient' | 'moderate' | 'strong';
 
 export interface InternalState {
   sessionId: string;
+  startedAt: number;
+  updatedAt: number;
+  schemaVersion: number;
+  appVersion: string;
   mode: 'conversation' | 'writing';
   phase: InternalStatePhase;
   turnIndex: number;
@@ -59,4 +63,5 @@ export interface InternalState {
   usedReframes: string[];
   collectedExamples: string[];
   keyUserPhrases: string[];
+  transcriptHistory: { role: 'human' | 'ai', text: string }[];
 }

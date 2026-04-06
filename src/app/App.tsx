@@ -1,4 +1,4 @@
-import { useState, useRef } from 'react';
+import { useState } from 'react';
 import { useSessionStore } from '../store/useSessionStore';
 import { ConductorEngine } from '../engine/conductor';
 import { StateUpdater } from '../engine/updateState';
@@ -6,17 +6,19 @@ import { InputClassifier } from '../engine/classifyInput';
 import type { UserIntent } from '../engine/classifyInput';
 import { OutcomeEngine } from '../engine/outcomeRules';
 import { useSpeechInput } from '../hooks/useSpeechInput';
+import { ResumeCard } from '../features/session/ResumeCard';
 import { askLLM } from '../../server/llm/client';
 import { DebugPanel } from '../dev/DebugPanel';
 import './index.css';
 
 export default function App() {
-  const { mode, setMode, phase, turnIndex, updateState, incrementTurn } = useSessionStore();
+  const { mode, setMode, phase, turnIndex, updateState, incrementTurn, resetSession } = useSessionStore();
   const { isListening, transcript, toggleListening, manualSetTranscript, error: sttError, isSupported } = useSpeechInput();
   
   const [currentQuestion, setCurrentQuestion] = useState("O que te trouxe aqui hoje? Onde sentes que está o peso maior?");
   const [inputText, setInputText] = useState("");
   const [isProcessing, setIsProcessing] = useState(false);
+  const [isResuming, setIsResuming] = useState(true); // Control flow flag for early intercepts
 
   const startSession = (selectedMode: 'conversation' | 'writing') => {
     setMode(selectedMode);
@@ -48,9 +50,15 @@ export default function App() {
       inputType: mode === 'conversation' ? (transcript !== finalUserText ? 'corrected_transcript' : 'transcribed') : 'typed'
     });
     
-    // 4. Update the real state
+    // 4. Update the real state and commit transcript block
+    const updatedHistory = [...state.transcriptHistory, 
+       { role: 'human', text: finalUserText },
+       { role: 'ai', text: response.userFacingText }
+    ];
+    
+    // @ts-ignore
     const stateUpdates = StateUpdater.enrich(state, intent as any, response);
-    updateState(stateUpdates);
+    updateState({ ...stateUpdates, transcriptHistory: updatedHistory as any });
     
     // 5. Update UI
     setCurrentQuestion(response.userFacingText);
@@ -106,8 +114,32 @@ export default function App() {
     );
   }
 
+  const handleExportEcosystem = () => {
+    const ecosystemProfile = {
+       wearLevel: { intensity: 'high', confidence: 'moderate', temporality: 'persistent', origin: 'inferido por fadiga estrutural' }
+       // Simulated for MVP output
+    };
+    alert('Mock Request Emitido: A gerar integração segura via Profile Ecosystem.');
+    console.log('[Ablute Ecosystem Handoff] Payload Export:', ecosystemProfile);
+  };
+
+  // INTERCEPT START
+  if (isResuming && turnIndex > 0 && (phase as string) !== 'outcome_delivered') {
+      return (
+         <div className="app-container" style={{ display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
+            <ResumeCard 
+              onResume={() => setIsResuming(false)} 
+              onReset={() => {
+                resetSession();
+                setIsResuming(false);
+              }}
+            />
+         </div>
+      );
+  }
+
   return (
-    <div className="container" style={{ padding: '0 2rem' }}>
+    <div className="app-container" style={{ padding: '0 2rem' }}>
       <div className="session-wrapper">
         <div className="topbar">
           <span>_introspect</span>
@@ -208,6 +240,17 @@ export default function App() {
                 {state.phase === 'closure_ready' ? 'Ver Leitura' : isProcessing ? '...' : 'Continuar'}
               </button>
             </div>
+            
+            {((phase as string) === 'outcome_delivered') && (
+               <div style={{ marginTop: '24px', borderTop: '1px solid #e2e8f0', paddingTop: '16px' }}>
+                  <button onClick={handleExportEcosystem} style={{ padding: '8px 16px', background: '#3b82f6', color: '#fff', borderRadius: '4px', border: 'none', cursor: 'pointer' }}>
+                     Exportar Leitura Interna (Ecossistema)
+                  </button>
+                  <button onClick={resetSession} style={{ padding: '8px 16px', background: 'transparent', color: '#64748b', border: 'none', cursor: 'pointer', marginLeft: '12px' }}>
+                     Limpar Sessão e Começar de Novo
+                  </button>
+               </div>
+            )}
           </div>
         </div>
       </div>
