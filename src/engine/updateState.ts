@@ -59,9 +59,9 @@ export class StateUpdater {
         currentPhase = 'deepening';
     }
 
-    const hasEnoughDimensions = nextCosts.length > 0 && nextMechanisms.length > 0;
+    const hasEnoughDimensions = nextCosts.length > 0 && nextMechanisms.length > 0 && nextFears.length > 0;
 
-    if (updates.confidenceLevel === 'strong' && hasEnoughDimensions && turn > 4) {
+    if (updates.confidenceLevel === 'strong' && hasEnoughDimensions && turn > 5) {
        currentPhase = 'closure_ready';
     }
 

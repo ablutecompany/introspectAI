@@ -26,6 +26,13 @@ export class ConductorEngine {
     }
 
     if (state.phase === 'guided_exploration') {
+      // FORCE structural bridging for the first post-onboarding questions
+      // The Onboarding itself is turnIndex 1. So turns 2 and 3 should be deeply structural!
+      if (state.turnIndex === 1) return 'ask_concrete_example'; // First reply after onboarding MUST ground the abstract feelings
+      if (state.turnIndex === 2) return 'ask_cost'; // Second reply must evaluate impact
+      if (state.turnIndex === 3) return 'ask_fear'; // Third reply goes into the specific blockages
+      
+      // Fallbacks if we still lack dimensions after turn 3
       if (state.costSignals.length === 0) return 'ask_cost';
       if (state.fearSignals.length === 0) return 'ask_fear';
       if (state.desiredLifeSignals.length === 0) return 'ask_desired_life';

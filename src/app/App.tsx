@@ -21,8 +21,18 @@ export default function App() {
   const [currentQuestion, setCurrentQuestion] = useState("");
   const [inputText, setInputText] = useState("");
   const [isProcessing, setIsProcessing] = useState(false);
-  const [isResuming, setIsResuming] = useState(true); // Control flow flag for early intercepts
+  
+  // Only start in a resuming state if we ACTUALLY mount with an existing active session > 0
+  const [isResuming, setIsResuming] = useState(() => useSessionStore.getState().turnIndex > 0);
   const [showTranscriptInput, setShowTranscriptInput] = useState(false);
+
+  // Guarantee that starting a brand new session mathematically clears the resumption block 
+  // preventing it from mistakenly triggering after onboarding steps
+  useEffect(() => {
+     if (turnIndex === 0) {
+        setIsResuming(false);
+     }
+  }, [turnIndex]);
 
   // Trigger TTS on new question if conversation mode
   useEffect(() => {
