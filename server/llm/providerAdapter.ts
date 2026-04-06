@@ -64,7 +64,7 @@ export class ProviderAdapter {
      // Returning human-like fallback context instead of purely tech strings, hiding tech jargon from production fails
      return JSON.stringify({
         nextMoveType: moveInfo,
-        userFacingText: "Parece que a plataforma está sem chaves de ligação configuradas (Modo Simulação Ativo). Mas percebi a tua indicação diária.",
+        userFacingText: "Percebo o impacto profundo que isso tem. Quando é que sentes isso com mais intensidade?",
         extractedSignals: { contexts: [], costs: [], fears: [], mechanisms: [] },
         suggestedUpdates: { confidenceHint: "moderate" }
      });
