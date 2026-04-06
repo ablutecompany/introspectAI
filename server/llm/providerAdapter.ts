@@ -1,10 +1,11 @@
 export class ProviderAdapter {
-  static async requestOpenAI(sysPrompt: string, userPrompt: string, retries = 2): Promise<{content: string, providerMode: 'live' | 'mock'}> {
+  static async requestOpenAI(sysPrompt: string, userPrompt: string, reqId: string = 'no-id', retries = 2): Promise<{content: string, providerMode: 'live' | 'mock'}> {
     const isLive = process.env.LIVE_MODE === 'true';
     const apiKey = process.env.OPENAI_API_KEY;
 
     // Use Mock unless explicitly flagged for live mode
     if (!isLive || !apiKey || apiKey === 'undefined') {
+       console.log(`[OpenAI Adapter] ID: ${reqId} | LIVE_MODE is false or API KEY missing. Falling back to MOCK.`);
        return Promise.resolve({
          content: this.mockJsonResolver(sysPrompt, userPrompt),
          providerMode: 'mock'
@@ -13,8 +14,13 @@ export class ProviderAdapter {
 
     try {
       const controller = new AbortController();
-      const timeoutId = setTimeout(() => controller.abort(), 12000); 
+      // Increase timeout explicitly for hefty OpenAI prompt responses, up to Vercel Hobby Limit safely
+      const timeoutId = setTimeout(() => {
+         console.warn(`[OpenAI Adapter] ID: ${reqId} | AbortController TIMEOUT reached (35000ms). Forcing abort.`);
+         controller.abort();
+      }, 35000); 
 
+      console.log(`[OpenAI Adapter] ID: ${reqId} | Sending request to api.openai.com... (retries left: ${retries})`);
       const res = await fetch('https://api.openai.com/v1/chat/completions', {
         method: 'POST',
         headers: {
@@ -35,15 +41,16 @@ export class ProviderAdapter {
       clearTimeout(timeoutId);
 
       if (!res.ok) throw new Error(`OpenAI API error: ${res.statusText}`);
-      
+      console.log(`[OpenAI Adapter] ID: ${reqId} | OpenAI Request OK (Status: ${res.status}). Parsing body...`);
       const data = await res.json();
+      console.log(`[OpenAI Adapter] ID: ${reqId} | Parsed body successfully.`);
       return { content: data.choices[0].message.content, providerMode: 'live' };
 
     } catch (e: any) {
       if (retries > 0) {
-         console.warn(`Provider failed, retrying... (${retries} left)`);
+         console.warn(`[OpenAI Adapter] ID: ${reqId} | Provider failed, retrying... (${retries} left). Error:`, e.message);
          await new Promise(r => setTimeout(r, 1000));
-         return this.requestOpenAI(sysPrompt, userPrompt, retries - 1);
+         return this.requestOpenAI(sysPrompt, userPrompt, reqId, retries - 1);
       }
       throw e;
     }

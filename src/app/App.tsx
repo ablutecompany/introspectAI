@@ -100,24 +100,39 @@ export default function App() {
     // 2. Conductor decides next move
     const nextMove = ConductorEngine.decideNextMove(state, intent as any);
     
+    const requestId = crypto.randomUUID();
+    console.log(`[Frontend Submit] Request ID: ${requestId} | Phase: ${state.phase} | Turn: ${state.turnIndex}`);
+    
     // 3. Ask LLM live Endpoint via local server boundary
     let response;
     try {
+      const payloadShape = {
+         internalState: state,
+         userResponse: finalUserText,
+         userIntent: intent,
+         forcedNextMove: nextMove,
+         inputType: mode === 'conversation' ? (transcript !== finalUserText ? 'corrected_transcript' : 'transcribed') : 'typed'
+      };
+      console.log(`[Frontend Submit] ID: ${requestId} | Payload Build OK. Sending to Backend...`, { hasState: !!payloadShape.internalState, textLen: payloadShape.userResponse.length, move: payloadShape.forcedNextMove });
+      
       const apiReq = await fetch('/api/llm', {
          method: 'POST',
-         headers: { 'Content-Type': 'application/json' },
-         body: JSON.stringify({
-            internalState: state,
-            userResponse: finalUserText,
-            userIntent: intent,
-            forcedNextMove: nextMove,
-            inputType: mode === 'conversation' ? (transcript !== finalUserText ? 'corrected_transcript' : 'transcribed') : 'typed'
-         })
+         headers: { 
+             'Content-Type': 'application/json',
+             'X-Request-ID': requestId 
+         },
+         body: JSON.stringify(payloadShape)
       });
-      if (!apiReq.ok) throw new Error('Proxy call failed.');
+      
+      if (!apiReq.ok) {
+         console.error(`[Frontend Submit] ID: ${requestId} | Native API Error Status: ${apiReq.status} ${apiReq.statusText}`);
+         throw new Error(`Proxy status: ${apiReq.status}`);
+      }
+      
       response = await apiReq.json();
+      console.log(`[Frontend Submit] ID: ${requestId} | Response OK.`);
     } catch (e: any) {
-      console.error("API Fetch Failure", e);
+      console.error(`[Frontend Submit] API Loop Failure | ID: ${requestId} | Error:`, e);
       stopListening();
       stopTTS();
       setConnectionError({ failedText: finalUserText, failedIntent: intent as any });
