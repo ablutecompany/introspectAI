@@ -2,36 +2,58 @@ import { useState, useCallback } from 'react';
 
 export const useTTS = () => {
   const [isSpeaking, setIsSpeaking] = useState(false);
+  const [ttsError, setTtsError] = useState<string | null>(null);
 
-  const speak = useCallback((text: string, onEnd?: () => void) => {
+  const speak = useCallback((text: string, onStartCallback?: () => void, onEndCallback?: () => void, onErrorCallback?: () => void) => {
     if (!('speechSynthesis' in window)) {
         console.warn('TTS não suportado no browser atual');
+        if (onErrorCallback) onErrorCallback();
+        setTtsError("not_supported");
         return;
     }
     
-    // Stop any ongoing speech
+    // Reset state
+    setTtsError(null);
     window.speechSynthesis.cancel();
     
-    // Create new utterance
     const utterance = new SpeechSynthesisUtterance(text);
-    
-    // Best effort for Portuguese (Portugal ideally, fallback to generic pt)
     const voices = window.speechSynthesis.getVoices();
     const ptVoice = voices.find(v => v.lang === 'pt-PT') || voices.find(v => v.lang.startsWith('pt'));
-    if (ptVoice) {
-        utterance.voice = ptVoice;
-    }
+    if (ptVoice) utterance.voice = ptVoice;
     
     utterance.lang = 'pt-PT';
-    utterance.rate = 0.95; // Slightly slower for better therapeutic cadence
+    utterance.rate = 0.95; 
     utterance.pitch = 1.0;
 
-    utterance.onstart = () => setIsSpeaking(true);
+    let hasStarted = false;
+    let timeoutId = setTimeout(() => {
+       if (!hasStarted) {
+          console.warn('TTS failed to start (likely browser autoplay block)');
+          window.speechSynthesis.cancel();
+          setTtsError("autoplay_blocked");
+          if (onErrorCallback) onErrorCallback();
+       }
+    }, 500); // 500ms block detection window
+
+    utterance.onstart = () => {
+       hasStarted = true;
+       clearTimeout(timeoutId);
+       setIsSpeaking(true);
+       if (onStartCallback) onStartCallback();
+    };
+    
     utterance.onend = () => {
        setIsSpeaking(false);
-       if (onEnd) onEnd();
+       if (onEndCallback) onEndCallback();
     };
-    utterance.onerror = () => setIsSpeaking(false);
+    
+    utterance.onerror = () => {
+       hasStarted = true; // prevents timeout racing
+       clearTimeout(timeoutId);
+       setIsSpeaking(false);
+       setTtsError("engine_error");
+       if (onErrorCallback) onErrorCallback();
+    };
 
     window.speechSynthesis.speak(utterance);
   }, []);
@@ -43,5 +65,5 @@ export const useTTS = () => {
     setIsSpeaking(false);
   }, []);
 
-  return { speak, stop, isSpeaking };
+  return { speak, stop, isSpeaking, ttsError };
 };

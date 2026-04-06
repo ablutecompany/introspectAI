@@ -71,10 +71,11 @@ interface OnboardingWizardProps {
 export function OnboardingWizard({ onComplete, mode, isProcessing }: OnboardingWizardProps) {
    const [currentStepIndex, setCurrentStepIndex] = useState(0);
    const [buffer, setBuffer] = useState<string[]>([]);
-   const { speak, stop: stopTTS } = useTTS();
+   const { speak, stop: stopTTS, ttsError } = useTTS();
    const { isListening, startListening, stopListening, toggleListening, manualSetTranscript, transcript: voiceTranscript, isSupported } = useSpeechInput();
    
-   const [uIState, setUIState] = useState<'speaking' | 'listening' | 'processing_match' | 'match_success' | 'match_fail' | 'idle'>('idle');
+   // Strict UI State Machine
+   const [uIState, setUIState] = useState<'booting' | 'needs_user_gesture' | 'tts_failed' | 'speaking' | 'listening' | 'processing_match' | 'match_success' | 'match_fail' | 'idle'>('booting');
    const [feedbackMsg, setFeedbackMsg] = useState("");
    const [matchedChip, setMatchedChip] = useState<string | null>(null);
 
@@ -83,22 +84,39 @@ export function OnboardingWizard({ onComplete, mode, isProcessing }: OnboardingW
    // Normalizer for Layer A
    const normalize = (str: string) => str.toLowerCase().normalize("NFD").replace(/[\u0300-\u036f]/g, "").replace(/[^\w\s]/gi, '').trim();
 
+   const fireTTSLoop = () => {
+       setUIState('booting');
+       speak(
+         currentStep.question, 
+         () => setUIState('speaking'), // onStart
+         () => {
+            // onEnd: Switch to microphone
+            if (mode === 'conversation' && isSupported) {
+               setUIState('listening');
+               startListening();
+            } else {
+               setUIState('idle');
+            }
+         },
+         () => {
+            // onError / Timeouts
+            setUIState('tts_failed');
+         }
+       );
+   };
+
    // Core Transition Engine
    useEffect(() => {
      if (mode === 'conversation' && currentStep.question) {
-       setUIState('speaking');
-       speak(currentStep.question, () => {
-          // AUTO START LISTENING ONCE INSTRUCTIONS FINISH
-          if (mode === 'conversation' && isSupported) {
-             setUIState('listening');
-             startListening();
-          } else {
-             setUIState('idle');
-          }
-       });
+        // Assume first we need a gesture on mount if index is 0, since many browsers drop prior Splash context
+        if (currentStepIndex === 0 && uIState === 'booting') {
+           setUIState('needs_user_gesture');
+        } else {
+           fireTTSLoop();
+        }
      }
      return () => stopTTS();
-   }, [currentStepIndex, mode, speak, stopTTS, startListening, isSupported, currentStep.question]);
+   }, [currentStepIndex, mode, stopTTS, isSupported, currentStep.question]);
 
    // Handle Semantic Matching and Silence Trigger
    useEffect(() => {
@@ -109,7 +127,6 @@ export function OnboardingWizard({ onComplete, mode, isProcessing }: OnboardingW
          const rawSpeech = voiceTranscript;
          const normalizedSpeech = normalize(rawSpeech);
          
-         // PASS 5: Open Voice Loop
          if (currentStepIndex === 4) {
             handleSelection(rawSpeech);
             return;
@@ -118,64 +135,51 @@ export function OnboardingWizard({ onComplete, mode, isProcessing }: OnboardingW
          setUIState('processing_match');
          setFeedbackMsg("A compreender resposta...");
 
-         console.log(`[Validation Pipeline] Step ${currentStep.step} received: "${rawSpeech}"`);
-
-         // LAYER A: Exact Normalized Match
+         // LAYER A
          let layerAMatch = currentStep.chips.find(c => normalize(c) === normalizedSpeech);
          if (layerAMatch) {
-             console.log(`[Validation Pipeline] Layer A Match: ${layerAMatch}`);
              executeMatchAnimation(layerAMatch);
              return;
          }
 
-         // LAYER B: Synonyms Match
+         // LAYER B
          const matchObj = currentStep.synonyms.find(syn => 
             syn.match.some(m => normalizedSpeech.includes(normalize(m)))
          );
          if (matchObj) {
-            console.log(`[Validation Pipeline] Layer B Match: ${matchObj.emit}`);
             executeMatchAnimation(matchObj.emit);
             return;
          }
 
-         // LAYER C: OpenAI Strict Schema Matching
-         console.log(`[Validation Pipeline] Layer C Active. Asking OpenAI...`);
+         // LAYER C (OpenAI)
          try {
             const apiReq = await fetch('/api/match', {
                method: 'POST',
                headers: { 'Content-Type': 'application/json' },
-               body: JSON.stringify({
-                  userVoice: rawSpeech,
-                  validOptions: currentStep.chips,
-                  stepQuestion: currentStep.question
-               }) // Ensure step info limits hallucinations
+               body: JSON.stringify({ userVoice: rawSpeech, validOptions: currentStep.chips, stepQuestion: currentStep.question })
             });
             const data = await apiReq.json();
-            console.log(`[Validation Pipeline] Layer C Result:`, data);
             
-            if (data.matchedOptionId && data.matchedOptionId !== 'NO_MATCH' && currentStep.chips.includes(data.matchedOptionId)) {
-                if (data.confidence !== 'low') {
-                    executeMatchAnimation(data.matchedOptionId);
-                    return;
-                }
+            if (data.matchedOptionId && data.matchedOptionId !== 'NO_MATCH' && currentStep.chips.includes(data.matchedOptionId) && data.confidence !== 'low') {
+                executeMatchAnimation(data.matchedOptionId);
+                return;
             }
          } catch (e) {
-            console.error('[Validation Pipeline] Layer C failed catastrophically', e);
+            console.error('[Validation Pipeline] Layer C block fail', e);
          }
 
          // FAILURE - NO MATCH
-         console.log(`[Validation Pipeline] Result: NO MATCH`);
          setUIState('match_fail');
          setFeedbackMsg("Ainda estou nesta pergunta. Podes dizer qual das opções ou tocar diretamente.");
-         manualSetTranscript(""); // Clean error state
-         speak("Não relacionei essa resposta com as opções. Podes escolher uma das que vês no ecrã?", () => {
-             // Restart listening
-             setFeedbackMsg("");
-             setUIState('listening');
-             startListening();
-         });
+         manualSetTranscript(""); 
+         
+         speak("Não relacionei essa resposta com as opções. Podes escolher uma das que vês no ecrã?", 
+           () => setUIState('speaking'),
+           () => { setFeedbackMsg(""); setUIState('listening'); startListening(); },
+           () => { setUIState('tts_failed'); }
+         );
 
-      }, 1800); // 1.8s pause trigger means snappy responses
+      }, 1800); 
 
       return () => clearTimeout(timeout);
    }, [voiceTranscript, isListening, mode, currentStepIndex]);
@@ -189,7 +193,7 @@ export function OnboardingWizard({ onComplete, mode, isProcessing }: OnboardingW
       setTimeout(() => {
          setMatchedChip(null);
          handleSelection(resolvedChip);
-      }, 1000); // Wait 1s so the user sees the green chip highlight
+      }, 1000); 
    };
 
    const handleSelection = (answer: string) => {
@@ -199,7 +203,6 @@ export function OnboardingWizard({ onComplete, mode, isProcessing }: OnboardingW
      stopListening();
      
      if (currentStepIndex === ONBOARDING_STEPS.length - 1) {
-       // Complete!
        const finalTranscript = `[User Context Buffer]: Peso principal: ${newBuffer[0]}. Intensidade: ${newBuffer[1]}. Momento: ${newBuffer[2]}. Tipo de peso: ${newBuffer[3]}. Exemplo dominante: ${newBuffer[4]}`;
        onComplete(finalTranscript);
      } else {
@@ -215,17 +218,33 @@ export function OnboardingWizard({ onComplete, mode, isProcessing }: OnboardingW
            {currentStep.question}
          </h2>
          
-         {/* Top Feedback Bar showing exactly what app is doing */}
+         {/* Top Feedback Bar showing HONEST states */}
          <div style={{ height: '32px', display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
-            {uIState === 'speaking' && <div style={{ color: '#3b82f6', fontWeight: 600 }}>A falar...</div>}
+            {uIState === 'booting' && <></>}
+            {uIState === 'needs_user_gesture' && <></>}
+            {uIState === 'tts_failed' && <div style={{ color: '#ef4444', fontWeight: 600, fontSize:'0.9rem' }}>Não consegui usar a voz. Podes tocar numa opção.</div>}
+            {uIState === 'speaking' && <div style={{ color: '#3b82f6', fontWeight: 600 }}>A Falar...</div>}
             {uIState === 'listening' && <div style={{ color: '#ef4444', fontWeight: 600 }}>Estou a ouvir...</div>}
             {uIState === 'processing_match' && <div style={{ color: '#d97706', fontWeight: 600 }}>A processar a tua resposta...</div>}
             {uIState === 'match_success' && <div style={{ color: '#22c55e', fontWeight: 600 }}>Percebi.</div>}
             {uIState === 'match_fail' && <div style={{ color: '#ef4444', fontSize: '0.9rem', textAlign: 'center' }}>{feedbackMsg}</div>}
          </div>
 
-         {/* Only show Open Mic prominently if step 5, otherwise keep hidden to enforce chips/guidance! */}
-         {mode === 'conversation' && currentStepIndex === 4 && (
+         {/* HONEST BLOCKER for Step 1 missing Gesture */}
+         {uIState === 'needs_user_gesture' && (
+             <div style={{ marginBottom: '24px' }}>
+                 <button 
+                    onClick={() => fireTTSLoop()}
+                    className="btn-primary"
+                    style={{ background: '#3b82f6', border: 'none', padding: '16px 32px', borderRadius: '32px', color: '#fff', fontSize: '1rem', cursor: 'pointer', boxShadow: '0 8px 16px rgba(59, 130, 246, 0.3)' }}
+                 >
+                    🎙️ Toca para iniciar conversa
+                 </button>
+             </div>
+         )}
+
+         {/* Step 5 Giant Microphone fallback */}
+         {mode === 'conversation' && currentStepIndex === 4 && uIState !== 'needs_user_gesture' && (
             <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', marginBottom: '16px' }}>
                <button 
                   onClick={toggleListening}
@@ -247,7 +266,7 @@ export function OnboardingWizard({ onComplete, mode, isProcessing }: OnboardingW
             </div>
          )}
          
-         {/* Live display of the transcript smoothly underneath the state */}
+         {/* Live Transcript Display */}
          {mode === 'conversation' && voiceTranscript && uIState !== 'match_success' && uIState !== 'match_fail' && (
              <div style={{ width: '100%', maxWidth: '400px', background: '#f8fafc', padding: '12px', borderRadius: '8px', marginBottom: '8px', border: '1px solid #e2e8f0' }}>
                  <p style={{ margin: 0, fontSize: '0.95rem', color: '#334155', fontStyle: 'italic', textAlign: 'center' }}>
@@ -256,7 +275,7 @@ export function OnboardingWizard({ onComplete, mode, isProcessing }: OnboardingW
              </div>
          )}
 
-         {/* Context Chips Aligned to Question */}
+         {/* Context Chips (Always available as safe fallbacks regardless of TTS/STT failure) */}
          <div style={{ display: 'flex', gap: '10px', flexWrap: 'wrap', justifyContent: 'center', width: '100%', maxWidth: 500, marginTop: '8px' }}>
              {currentStep.chips.map(chipText => {
                 const isMatched = matchedChip === chipText;
