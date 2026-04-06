@@ -58,7 +58,13 @@ const ONBOARDING_STEPS = [
     step: 5,
     question: "Se tivesses de me dar um exemplo simples, o que é que mais mostra isso no teu dia-a-dia?",
     chips: ["No trabalho", "Em casa", "Com pessoas", "Dentro da cabeça", "Não sei"],
-    synonyms: [] // Passo 5 aceita voz 100% livre
+    synonyms: [
+       { match: ['trabalho', 'trabalhar', 'emprego', 'escritório', 'profissão', 'colegas', 'patrão'], emit: 'No trabalho' },
+       { match: ['casa', 'família em casa', 'lar', 'minha casa'], emit: 'Em casa' },
+       { match: ['pessoas', 'socia', 'outro', 'outros', 'interação', 'amigos', 'alguém'], emit: 'Com pessoas' },
+       { match: ['cabeça', 'mente', 'mental', 'pensamento', 'ideia', 'interior'], emit: 'Dentro da cabeça' },
+       { match: ['não sei', 'faço ideia', 'difícil dizer'], emit: 'Não sei' }
+    ]
   }
 ];
 
@@ -119,16 +125,16 @@ export function OnboardingWizard({ onComplete, mode, isProcessing }: OnboardingW
      return () => stopTTS();
    }, [currentStepIndex, mode, stopTTS, isSupported, currentStep.question]);
 
-   const finalizeOnboardingExample = (answerPayload: string) => {
-      console.log(`[Onboarding Finalize] Step: 5 | Final Payload: "${answerPayload}"`);
+   const finalizeOnboardingStep5 = (resolvedContext: string) => {
+      console.log(`[Onboarding Finalize] Step: 5 | Resolved Context: "${resolvedContext}"`);
       
       stopListening();
       setUIState('match_success');
       setFeedbackMsg("Percebi o contexto.");
-      setMatchedChip(answerPayload); // Visually acknowledge if it was a chip
+      setMatchedChip(resolvedContext); // Visually acknowledge matching chip
 
       setTimeout(() => {
-         const newBuffer = [...buffer, answerPayload];
+         const newBuffer = [...buffer, resolvedContext];
          setMatchedChip(null);
          setFeedbackMsg(""); 
          setUIState('idle'); // Prevent locking
@@ -140,7 +146,7 @@ export function OnboardingWizard({ onComplete, mode, isProcessing }: OnboardingW
 
    const commitOnboardingAnswer = (stepId: number, rawInput: string, finalChipValue: string) => {
       if (stepId === 5) {
-         finalizeOnboardingExample(finalChipValue);
+         finalizeOnboardingStep5(finalChipValue);
          return;
       }
       
@@ -170,23 +176,22 @@ export function OnboardingWizard({ onComplete, mode, isProcessing }: OnboardingW
       const normalizedSpeech = normalize(rawSpeech);
 
       // NÍVEL B - Secondary safeguard for EAGER MATCH if hardware closed mic instantly before catching it live
-      if (currentStepIndex !== 4) {
-         let directMatch = currentStep.chips.find(c => {
-             const coreLabel = normalize(c.split('/')[0]).trim();
-             return normalizedSpeech.includes(coreLabel);
-         });
-         if (directMatch) {
-             console.log(`[Validation Pipeline] Secondary Layer A Match (Includes): ${directMatch}`);
-             commitOnboardingAnswer(currentStep.step, rawSpeech, directMatch);
-             return;
-         }
+      // Agora válido em todos os passos, incluindo Passo 5
+      let directMatch = currentStep.chips.find(c => {
+          const coreLabel = normalize(c.split('/')[0]).trim();
+          return normalizedSpeech.includes(coreLabel);
+      });
+      if (directMatch) {
+          console.log(`[Validation Pipeline] Secondary Layer A Match (Includes): ${directMatch}`);
+          commitOnboardingAnswer(currentStep.step, rawSpeech, directMatch);
+          return;
+      }
 
-         let synMatch = currentStep.synonyms.find(syn => syn.match.some(m => normalizedSpeech.includes(normalize(m))));
-         if (synMatch) {
-             console.log(`[Validation Pipeline] Secondary Layer B Match: ${synMatch.emit}`);
-             commitOnboardingAnswer(currentStep.step, rawSpeech, synMatch.emit);
-             return;
-         }
+      let synMatch = currentStep.synonyms.find(syn => syn.match.some(m => normalizedSpeech.includes(normalize(m))));
+      if (synMatch) {
+          console.log(`[Validation Pipeline] Secondary Layer B Match: ${synMatch.emit}`);
+          commitOnboardingAnswer(currentStep.step, rawSpeech, synMatch.emit);
+          return;
       }
 
       setUIState('processing_match');
@@ -204,8 +209,8 @@ export function OnboardingWizard({ onComplete, mode, isProcessing }: OnboardingW
          if (data.matchedOptionId && data.matchedOptionId !== 'NO_MATCH' && currentStep.chips.includes(data.matchedOptionId) && data.confidence !== 'low') {
              console.log(`[Validation Pipeline] Layer C AI Match: ${data.matchedOptionId}`);
              if (currentStepIndex === 4) {
-                // Step 5 accepts unstructured broad text if AI allows it
-                finalizeOnboardingExample(rawSpeech);
+                // Passo 5 fallback
+                finalizeOnboardingStep5(data.matchedOptionId);
              } else {
                 commitOnboardingAnswer(currentStep.step, rawSpeech, data.matchedOptionId);
              }
@@ -248,7 +253,7 @@ export function OnboardingWizard({ onComplete, mode, isProcessing }: OnboardingW
 
       // NÍVEL B: INSTANT EAGER LAYER A / B EVALUATION (Real-time hotword trapping in phrase)
       // Fires immediately on every transcript change! Includes substring capturing.
-      if (isListening && rawSpeech.trim().length >= 3 && currentStepIndex !== 4) {
+      if (isListening && rawSpeech.trim().length >= 3) {
          let directMatch = currentStep.chips.find(c => {
              const coreLabel = normalize(c.split('/')[0]).trim();
              return normalizedSpeech.includes(coreLabel);
@@ -256,6 +261,7 @@ export function OnboardingWizard({ onComplete, mode, isProcessing }: OnboardingW
          
          if (directMatch) {
              console.log(`[Realtime Pipeline] Layer A Instant Phrase Match: ${directMatch}`);
+             // This maps right through commit -> finalize for Step 5 too!
              commitOnboardingAnswer(currentStep.step, rawSpeech, directMatch);
              return;
          }
@@ -347,7 +353,8 @@ export function OnboardingWizard({ onComplete, mode, isProcessing }: OnboardingW
                    onKeyDown={(e) => {
                       if (e.key === 'Enter' && !e.shiftKey) {
                          e.preventDefault();
-                         finalizeOnboardingExample(e.currentTarget.value);
+                         // Escrita manual no passo 5 pode ir crua
+                         finalizeOnboardingStep5(e.currentTarget.value);
                       }
                    }}
                    style={{ width: '100%', minHeight: '80px', padding: '12px', borderRadius: '8px', border: '1px solid #cbd5e1', fontSize: '1rem', fontFamily: 'inherit' }}
@@ -376,7 +383,7 @@ export function OnboardingWizard({ onComplete, mode, isProcessing }: OnboardingW
                      key={chipText} 
                      disabled={uIState === 'match_success' || uIState === 'processing_match'}
                      onClick={() => {
-                         if (currentStepIndex === 4) finalizeOnboardingExample(chipText);
+                         if (currentStepIndex === 4) finalizeOnboardingStep5(chipText);
                          else commitOnboardingAnswer(currentStep.step, `<Toque Direto>`, chipText);
                      }}
                      style={{ 

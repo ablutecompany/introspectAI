@@ -204,6 +204,42 @@ export default function App() {
     console.log('[Ablute Ecosystem Handoff] Payload Export:', ecosystemProfile);
   };
 
+  // ERROR STATE OVERRIDE (Must be highest priority to prevent silent crashes in Turn 0)
+  if (connectionError) {
+      return (
+         <div className="app-container" style={{ padding: '0 2rem', display: 'flex', alignItems: 'center', justifyContent: 'center', height: '100vh' }}>
+            <div style={{ textAlign: 'center', display: 'flex', flexDirection: 'column', alignItems: 'center', maxWidth: '400px', width: '100%' }}>
+               <div style={{ padding: '24px', background: '#fee2e2', borderRadius: '12px', color: '#b91c1c', width: '100%', marginBottom: '32px', border: '1px solid #fca5a5', boxShadow: '0 8px 16px rgba(185, 28, 28, 0.1)' }}>
+                  <strong style={{ fontSize: '1.2rem', display: 'block', marginBottom: '12px' }}>Falha na Ligação</strong>
+                  <span style={{ fontSize: '0.95rem', lineHeight: '1.5' }}>Não foi possível contactar o motor. Não te preocupes, o teu progresso exato está preservado localmente.</span>
+               </div>
+               <button onClick={() => recoverFromConnectionError()} className="btn-primary" style={{ marginBottom: '32px', background: '#ef4444', padding: '16px 32px', fontSize: '1.1rem', width: '100%' }}>
+                  Tentar de novo
+               </button>
+               {mode === 'conversation' && (
+                  <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center' }}>
+                     <div style={{ color: '#64748b', fontSize: '0.9rem', marginBottom: '16px' }}>Também podes tocar abaixo e dizer "ok"</div>
+                     <button 
+                       onClick={toggleListening} 
+                       disabled={!isSupported || isProcessing}
+                       style={{
+                          width: '80px', height: '80px', borderRadius: '50%', 
+                          background: isListening ? '#ef4444' : '#0f172a',
+                          color: '#fff', border: 'none', cursor: 'pointer',
+                          fontSize: '1.8rem', boxShadow: isListening ? '0 0 24px rgba(239,68,68,0.5)' : 'none',
+                          transition: '0.2s all'
+                       }}
+                     >
+                        🎙️
+                     </button>
+                     {isListening && <div style={{ color: '#ef4444', fontSize: '0.9rem', marginTop: '12px', fontWeight: 'bold' }}>Estou a ouvir...</div>}
+                  </div>
+               )}
+            </div>
+         </div>
+      );
+  }
+
   // INTERCEPT START
   if (isResuming && turnIndex > 0 && (phase as string) !== 'outcome_delivered') {
       return (
@@ -256,36 +292,7 @@ export default function App() {
           </h2>
 
           <div className="input-area">
-            {connectionError ? (
-               <div style={{ textAlign: 'center', display: 'flex', flexDirection: 'column', alignItems: 'center' }}>
-                  <div style={{ padding: '16px', background: '#fee2e2', borderRadius: '8px', color: '#b91c1c', width: '100%', marginBottom: '24px', border: '1px solid #fca5a5' }}>
-                     <strong style={{ fontSize: '1.05rem', display: 'block', marginBottom: '8px' }}>Falha na Ligação</strong>
-                     <span style={{ fontSize: '0.9rem' }}>Não foi possível contactar o motor. Não te preocupes, o teu progresso de agora está preservado localmente.</span>
-                  </div>
-                  <button onClick={() => recoverFromConnectionError()} className="btn-primary" style={{ marginBottom: '24px', background: '#ef4444' }}>
-                     Tentar de novo
-                  </button>
-                  {mode === 'conversation' && (
-                     <>
-                        <div style={{ color: '#64748b', fontSize: '0.85rem', marginBottom: '12px' }}>Podes interagir abaixo ou dizer "ok"</div>
-                        <button 
-                          onClick={toggleListening} 
-                          disabled={!isSupported || isProcessing}
-                          style={{
-                             width: '70px', height: '70px', borderRadius: '50%', 
-                             background: isListening ? '#ef4444' : '#0f172a',
-                             color: '#fff', border: 'none', cursor: 'pointer',
-                             fontSize: '1.4rem', boxShadow: isListening ? '0 0 16px rgba(239,68,68,0.5)' : 'none',
-                             transition: '0.2s all'
-                          }}
-                        >
-                           🎙️
-                        </button>
-                        {isListening && <div style={{ color: '#ef4444', fontSize: '0.8rem', marginTop: '8px', fontWeight: 'bold' }}>Estou a ouvir...</div>}
-                     </>
-                  )}
-               </div>
-            ) : mode === 'writing' ? (
+            {mode === 'writing' ? (
               <textarea
                 autoFocus
                 value={inputText}
