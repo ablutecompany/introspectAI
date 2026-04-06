@@ -1,8 +1,7 @@
 export class ProviderAdapter {
   static async requestOpenAI(sysPrompt: string, userPrompt: string, retries = 2): Promise<{content: string, providerMode: 'live' | 'mock'}> {
-    // Vite requires explicit static strings, optional chaining breaks its regex parser.
-    const isLive = import.meta.env.VITE_LIVE_MODE === 'true';
-    const apiKey = import.meta.env.VITE_OPENAI_API_KEY;
+    const isLive = process.env.LIVE_MODE === 'true';
+    const apiKey = process.env.OPENAI_API_KEY;
 
     // Use Mock unless explicitly flagged for live mode
     if (!isLive || !apiKey || apiKey === 'undefined') {
