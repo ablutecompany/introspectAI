@@ -83,6 +83,8 @@ export default function App() {
   };
 
   const handleUserSubmit = async (rawIntent: UserIntent | 'auto' = 'auto', overrideText?: string) => {
+    stopListening();
+    stopTTS(); // Protects manual route against active voice overlap during turn changes
     const isVoiceTurn = mode === 'conversation' && rawIntent === 'auto';
     const finalUserText = overrideText || (isVoiceTurn ? transcript : inputText);
 

@@ -129,15 +129,16 @@ export function OnboardingWizard({ onComplete, mode, isProcessing }: OnboardingW
       console.log(`[Onboarding Finalize] Step: 5 | Resolved Context: "${resolvedContext}"`);
       
       stopListening();
+      stopTTS(); // Force kill voice reading to prevent overlap during transition
       setUIState('match_success');
       setFeedbackMsg("Percebi o contexto.");
-      setMatchedChip(resolvedContext); // Visually acknowledge matching chip
+      setMatchedChip(resolvedContext); 
 
       setTimeout(() => {
          const newBuffer = [...buffer, resolvedContext];
          setMatchedChip(null);
          setFeedbackMsg(""); 
-         setUIState('idle'); // Prevent locking
+         setUIState('idle'); 
          
          const finalTranscript = `[User Context Buffer]: Peso principal: ${newBuffer[0]}. Intensidade: ${newBuffer[1]}. Momento: ${newBuffer[2]}. Tipo de peso: ${newBuffer[3]}. Exemplo dominante: ${newBuffer[4]}`;
          onComplete(finalTranscript);
@@ -153,6 +154,7 @@ export function OnboardingWizard({ onComplete, mode, isProcessing }: OnboardingW
       console.log(`[Onboarding Commit] Step: ${stepId} | Raw: "${rawInput}" | Option: "${finalChipValue}"`);
       
       stopListening();
+      stopTTS(); // Force kill voice
       setUIState('match_success');
       setFeedbackMsg("Percebi.");
       setMatchedChip(finalChipValue);
@@ -343,17 +345,17 @@ export function OnboardingWizard({ onComplete, mode, isProcessing }: OnboardingW
                </div>
             </div>
          )}
-                  {/* Writing Fallback for Step 5 */}
-          {mode === 'writing' && currentStepIndex === 4 && (
+                  
+          {/* Writing Fallback for Step 5 (Unconditional, always available for manual route) */}
+          {currentStepIndex === 4 && (
              <div style={{ width: '100%', maxWidth: '400px', display: 'flex', flexDirection: 'column', gap: '8px', marginBottom: '16px' }}>
                 <textarea 
-                   autoFocus
                    disabled={uIState === 'processing_match' || uIState === 'match_success'}
                    placeholder="Escreve o teu exemplo..."
                    onKeyDown={(e) => {
                       if (e.key === 'Enter' && !e.shiftKey) {
                          e.preventDefault();
-                         // Escrita manual no passo 5 pode ir crua
+                         stopTTS();
                          finalizeOnboardingStep5(e.currentTarget.value);
                       }
                    }}
