@@ -42,6 +42,11 @@ const makeInitialState = (): InternalState => ({
   usedReframes: [],
   collectedExamples: [],
   keyUserPhrases: [],
+  transcriptHistory: [],
+  startedAt: Date.now(),
+  updatedAt: Date.now(),
+  schemaVersion: 1,
+  appVersion: '1.0.0'
 });
 
 export async function runMockSessions() {

@@ -9,6 +9,7 @@ import { useSpeechInput } from '../hooks/useSpeechInput';
 import { useTTS } from '../hooks/useTTS';
 import { ResumeCard } from '../features/session/ResumeCard';
 import { PostSessionFeedback } from '../features/feedback/PostSessionFeedback';
+import { OnboardingWizard } from '../features/session/OnboardingWizard';
 import { DebugPanel } from '../dev/DebugPanel';
 import './index.css';
 
@@ -17,7 +18,7 @@ export default function App() {
   const { isListening, transcript, toggleListening, manualSetTranscript, error: sttError, isSupported } = useSpeechInput();
   const { speak, stop: stopTTS, isSpeaking } = useTTS();
   
-  const [currentQuestion, setCurrentQuestion] = useState("O que te trouxe aqui hoje? Onde sentes que está o peso maior?");
+  const [currentQuestion, setCurrentQuestion] = useState("");
   const [inputText, setInputText] = useState("");
   const [isProcessing, setIsProcessing] = useState(false);
   const [isResuming, setIsResuming] = useState(true); // Control flow flag for early intercepts
@@ -35,9 +36,9 @@ export default function App() {
     updateState({ phase: 'micro_triage' });
   };
 
-  const handleUserSubmit = async (rawIntent: UserIntent | 'auto' = 'auto') => {
+  const handleUserSubmit = async (rawIntent: UserIntent | 'auto' = 'auto', overrideText?: string) => {
     const isVoiceTurn = mode === 'conversation' && rawIntent === 'auto';
-    const finalUserText = isVoiceTurn ? transcript : inputText;
+    const finalUserText = overrideText || (isVoiceTurn ? transcript : inputText);
 
     if (!finalUserText.trim() && rawIntent === 'auto') return;
     
@@ -171,6 +172,21 @@ export default function App() {
             <pre style={{ fontSize: '0.8em', whiteSpace: 'pre-wrap' }}>
               {JSON.stringify(OutcomeEngine.calculateOutcome(state).payload, null, 2)}
             </pre>
+         </div>
+      );
+  }
+
+  if (turnIndex === 0 && phase === 'micro_triage') {
+      return (
+         <div className="app-container">
+            <OnboardingWizard 
+               mode={mode} 
+               isProcessing={isProcessing}
+               onComplete={(stitchedTranscript) => {
+                  handleUserSubmit('auto', stitchedTranscript);
+               }} 
+            />
+            <DebugPanel />
          </div>
       );
   }
