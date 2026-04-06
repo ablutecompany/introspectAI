@@ -36,9 +36,9 @@ export default function App() {
      }
   }, [currentQuestion, mode, speak, turnIndex, startListening]);
 
-  // Handle Silence Auto-Submit
+  // Handle Silence Auto-Submit ONLY for main conversation flow, not onboarding
   useEffect(() => {
-     if (mode === 'conversation' && isListening && transcript.trim().length >= 4) {
+     if (mode === 'conversation' && turnIndex > 0 && isListening && transcript.trim().length >= 4) {
         const timeout = setTimeout(() => {
            // Silence reached during listening, auto submit phrase!
            stopListening();
@@ -46,7 +46,7 @@ export default function App() {
         }, 2200);
         return () => clearTimeout(timeout);
      }
-  }, [transcript, isListening, mode]);
+  }, [transcript, isListening, mode, turnIndex]);
 
   const startSession = (selectedMode: 'conversation' | 'writing') => {
     setMode(selectedMode);
