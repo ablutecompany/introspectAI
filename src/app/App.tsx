@@ -21,10 +21,29 @@ export default function App() {
   const [currentQuestion, setCurrentQuestion] = useState("");
   const [inputText, setInputText] = useState("");
   const [isProcessing, setIsProcessing] = useState(false);
+  const [connectionError, setConnectionError] = useState<{ failedText: string, failedIntent: UserIntent | 'auto' } | null>(null);
   
   // Only start in a resuming state if we ACTUALLY mount with an existing active session > 0
   const [isResuming, setIsResuming] = useState(() => useSessionStore.getState().turnIndex > 0);
   const [showTranscriptInput, setShowTranscriptInput] = useState(false);
+
+  useEffect(() => {
+     if (connectionError && isListening) {
+         const norm = transcript.toLowerCase().trim();
+         if (norm.includes('ok') || norm.includes('está bem') || norm.includes('esta bem')) {
+             stopListening();
+             recoverFromConnectionError();
+         }
+     }
+  }, [transcript, isListening, connectionError]);
+
+  const recoverFromConnectionError = () => {
+      if (!connectionError) return;
+      console.log('[System Recovery] Resuming failed context transmission...');
+      const { failedText, failedIntent } = connectionError;
+      setConnectionError(null);
+      handleUserSubmit(failedIntent, failedText);
+  };
 
   // Guarantee that starting a brand new session mathematically clears the resumption block 
   // preventing it from mistakenly triggering after onboarding steps
@@ -96,14 +115,11 @@ export default function App() {
       if (!apiReq.ok) throw new Error('Proxy call failed.');
       response = await apiReq.json();
     } catch (e: any) {
-      console.error(e);
-      // Fallback rescue structure if proxy dies entirely
-      response = { 
-         nextMoveType: nextMove, 
-         userFacingText: 'A ligação falhou temporariamente. O motor não conseguiu receber o teu contexto. Diz "ok" para tentar de novo, ou refresca a página se persistir.', 
-         extractedSignals: { contexts: [], costs: [], fears: [], mechanisms: [] },
-         suggestedUpdates: { confidenceHint: 'insufficient' }
-      };
+      console.error("API Fetch Failure", e);
+      stopListening();
+      setConnectionError({ failedText: finalUserText, failedIntent: intent as any });
+      setIsProcessing(false);
+      return; 
     }
     
     // 4. Update the real state and commit transcript block
@@ -239,7 +255,36 @@ export default function App() {
           </h2>
 
           <div className="input-area">
-            {mode === 'writing' ? (
+            {connectionError ? (
+               <div style={{ textAlign: 'center', display: 'flex', flexDirection: 'column', alignItems: 'center' }}>
+                  <div style={{ padding: '16px', background: '#fee2e2', borderRadius: '8px', color: '#b91c1c', width: '100%', marginBottom: '24px', border: '1px solid #fca5a5' }}>
+                     <strong style={{ fontSize: '1.05rem', display: 'block', marginBottom: '8px' }}>Falha na Ligação</strong>
+                     <span style={{ fontSize: '0.9rem' }}>Não foi possível contactar o motor. Não te preocupes, o teu progresso de agora está preservado localmente.</span>
+                  </div>
+                  <button onClick={() => recoverFromConnectionError()} className="btn-primary" style={{ marginBottom: '24px', background: '#ef4444' }}>
+                     Tentar de novo
+                  </button>
+                  {mode === 'conversation' && (
+                     <>
+                        <div style={{ color: '#64748b', fontSize: '0.85rem', marginBottom: '12px' }}>Podes interagir abaixo ou dizer "ok"</div>
+                        <button 
+                          onClick={toggleListening} 
+                          disabled={!isSupported || isProcessing}
+                          style={{
+                             width: '70px', height: '70px', borderRadius: '50%', 
+                             background: isListening ? '#ef4444' : '#0f172a',
+                             color: '#fff', border: 'none', cursor: 'pointer',
+                             fontSize: '1.4rem', boxShadow: isListening ? '0 0 16px rgba(239,68,68,0.5)' : 'none',
+                             transition: '0.2s all'
+                          }}
+                        >
+                           🎙️
+                        </button>
+                        {isListening && <div style={{ color: '#ef4444', fontSize: '0.8rem', marginTop: '8px', fontWeight: 'bold' }}>Estou a ouvir...</div>}
+                     </>
+                  )}
+               </div>
+            ) : mode === 'writing' ? (
               <textarea
                 autoFocus
                 value={inputText}
@@ -337,7 +382,7 @@ export default function App() {
               </div>
             )}
 
-            {mode === 'writing' && (
+            {mode === 'writing' && !connectionError && (
               <div className="controls">
                 <div className="secondary-actions">
                   <button onClick={() => handleUserSubmit('dont_know')} disabled={isProcessing} className="btn-secondary">Não sei</button>
@@ -347,7 +392,7 @@ export default function App() {
               </div>
             )}
 
-            {mode === 'writing' && (
+            {mode === 'writing' && !connectionError && (
               <div className="controls" style={{ marginTop: '24px' }}>
                 <button 
                   onClick={() => {
