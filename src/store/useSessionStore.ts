@@ -9,8 +9,8 @@ interface SessionStore extends InternalState {
   resetSession: () => void;
 }
 
-const CURRENT_SCHEMA_VERSION = 1;
-const CURRENT_APP_VERSION = '1.0.0-rc1';
+const CURRENT_SCHEMA_VERSION = 2;
+const CURRENT_APP_VERSION = 'v2.0.HalfDuplex';
 const EXPIRY_DAYS = 7;
 
 const initialState: Omit<InternalState, 'sessionId' | 'startedAt' | 'updatedAt' | 'schemaVersion' | 'appVersion'> = {

@@ -90,7 +90,7 @@ export default function App() {
       // Fallback rescue structure if proxy dies entirely
       response = { 
          nextMoveType: nextMove, 
-         userFacingText: '[Mock Fallback de Emergência API]', 
+         userFacingText: 'A ligação falhou temporariamente. O motor não conseguiu receber o teu contexto. Diz "ok" para tentar de novo, ou refresca a página se persistir.', 
          extractedSignals: { contexts: [], costs: [], fears: [], mechanisms: [] },
          suggestedUpdates: { confidenceHint: 'insufficient' }
       };
@@ -138,8 +138,11 @@ export default function App() {
               Prefiro Escrever
             </button>
           </div>
+          <div style={{ marginTop: '32px', fontSize: '0.75rem', color: '#cbd5e1' }}>
+             {useSessionStore.getState().appVersion}
+          </div>
         </div>
-        <DebugPanel />
+        {!import.meta.env.PROD && <DebugPanel />}
       </div>
     );
   }
@@ -160,7 +163,7 @@ export default function App() {
           </div>
           <button onClick={() => useSessionStore.getState().resetSession()} className="btn-primary" style={{ marginTop: 32 }}>Nova Sessão</button>
         </div>
-        <DebugPanel />
+        {!import.meta.env.PROD && <DebugPanel />}
       </div>
     );
   }
@@ -185,10 +188,14 @@ export default function App() {
                 setIsResuming(false);
               }}
             />
-            <h4>Resultado Preliminar (Dev Mode):</h4>
-            <pre style={{ fontSize: '0.8em', whiteSpace: 'pre-wrap' }}>
-              {JSON.stringify(OutcomeEngine.calculateOutcome(state).payload, null, 2)}
-            </pre>
+            {!import.meta.env.PROD && (
+               <>
+                  <h4>Resultado Preliminar (Dev Mode):</h4>
+                  <pre style={{ fontSize: '0.8em', whiteSpace: 'pre-wrap' }}>
+                    {JSON.stringify(OutcomeEngine.calculateOutcome(state).payload, null, 2)}
+                  </pre>
+               </>
+            )}
          </div>
       );
   }
@@ -203,7 +210,7 @@ export default function App() {
                   handleUserSubmit('auto', stitchedTranscript);
                }} 
             />
-            <DebugPanel />
+            {!import.meta.env.PROD && <DebugPanel />}
          </div>
       );
   }
@@ -370,7 +377,7 @@ export default function App() {
           </div>
         </div>
       </div>
-      <DebugPanel />
+      {!import.meta.env.PROD && <DebugPanel />}
     </div>
   );
 }
