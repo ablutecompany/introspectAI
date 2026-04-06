@@ -15,7 +15,7 @@ import './index.css';
 
 export default function App() {
   const { mode, setMode, phase, turnIndex, updateState, incrementTurn, resetSession } = useSessionStore();
-  const { isListening, transcript, toggleListening, manualSetTranscript, error: sttError, isSupported } = useSpeechInput();
+  const { isListening, transcript, toggleListening, startListening, stopListening, manualSetTranscript, error: sttError, isSupported } = useSpeechInput();
   const { speak, stop: stopTTS, isSpeaking } = useTTS();
   
   const [currentQuestion, setCurrentQuestion] = useState("");
@@ -27,9 +27,26 @@ export default function App() {
   // Trigger TTS on new question if conversation mode
   useEffect(() => {
      if (mode === 'conversation' && currentQuestion) {
-        speak(currentQuestion);
+        speak(currentQuestion, () => {
+           // Auto-start listening ONLY if we are past the onboarding wizard
+           if (turnIndex > 0) {
+              startListening();
+           }
+        });
      }
-  }, [currentQuestion, mode, speak]);
+  }, [currentQuestion, mode, speak, turnIndex, startListening]);
+
+  // Handle Silence Auto-Submit
+  useEffect(() => {
+     if (mode === 'conversation' && isListening && transcript.trim().length >= 4) {
+        const timeout = setTimeout(() => {
+           // Silence reached during listening, auto submit phrase!
+           stopListening();
+           handleUserSubmit('auto');
+        }, 2200);
+        return () => clearTimeout(timeout);
+     }
+  }, [transcript, isListening, mode]);
 
   const startSession = (selectedMode: 'conversation' | 'writing') => {
     setMode(selectedMode);
@@ -228,8 +245,6 @@ export default function App() {
                       Pausar leitura de IA ◼
                    </button>
                 )}
-
-                {/* Big Mic Button Focus */}
                 <div style={{ padding: '32px 0' }}>
                    <button 
                      onClick={toggleListening} 
@@ -239,25 +254,31 @@ export default function App() {
                         height: '100px',
                         borderRadius: '50%', 
                         border: isListening ? '6px solid #fecaca' : 'none', 
-                        background: isListening ? '#ef4444' : '#0f172a',
+                        background: isProcessing ? '#fbbf24' : isListening ? '#ef4444' : isSpeaking ? '#3b82f6' : '#0f172a',
                         color: '#fff',
-                        cursor: (isSupported && !isSpeaking) ? 'pointer' : 'not-allowed',
-                        boxShadow: isListening ? '0 0 24px rgba(239, 68, 68, 0.4)' : '0 8px 16px rgba(15, 23, 42, 0.2)',
+                        cursor: (isSupported && !isSpeaking && !isProcessing) ? 'pointer' : 'not-allowed',
+                        boxShadow: isListening ? '0 0 24px rgba(239, 68, 68, 0.4)' : isProcessing ? '0 0 24px rgba(251, 191, 36, 0.4)' : isSpeaking ? '0 0 24px rgba(59, 130, 246, 0.4)' : '0 8px 16px rgba(15, 23, 42, 0.2)',
                         transition: '0.2s all',
                         display: 'flex',
                         flexDirection: 'column',
                         alignItems: 'center',
-                        justifyContent: 'center',
-                        opacity: isSpeaking ? 0.3 : 1
+                        justifyContent: 'center'
                      }}
                    >
-                     <span style={{ fontSize: '2rem' }}>{isListening ? '🎙️' : '🎙'}</span>
+                     <span style={{ fontSize: '2rem' }}>
+                        {isProcessing ? '⏳' : isSpeaking ? '🔊' : '🎙️'}
+                     </span>
                    </button>
-                   <div style={{ textAlign: 'center', marginTop: '16px', color: isListening ? '#ef4444' : '#64748b', fontWeight: isListening ? 'bold' : 'normal' }}>
-                      {isListening ? 'Podes falar...' : 'Toca para Falar'}
+                   <div style={{ textAlign: 'center', marginTop: '16px', color: isProcessing ? '#d97706' : isListening ? '#ef4444' : isSpeaking ? '#2563eb' : '#64748b', fontWeight: (isListening || isSpeaking || isProcessing) ? 'bold' : 'normal' }}>
+                      {isProcessing ? 'A processar...' : isSpeaking ? 'A falar...' : isListening ? 'Estou a ouvir...' : 'Toca para Falar'}
                    </div>
+                   {isListening && transcript.trim().length > 0 && (
+                      <div style={{ fontSize: '0.75rem', color: '#94a3b8', marginTop: 4, fontStyle: 'italic', textAlign: 'center' }}>
+                         (Irá enviar automaticamente se houver pausa)
+                      </div>
+                   )}
                    {sttError && <div style={{color: '#ef4444', fontSize: 12, marginTop: 8, textAlign:'center'}}>{sttError}</div>}
-                </div>
+                 </div>
                 
                 {/* Visual support and manual edit toggle */}
                 {transcript && (
@@ -285,14 +306,14 @@ export default function App() {
                 {/* Voice-First Chips Sub-Layer */}
                 <div style={{ display: 'flex', gap: '8px', flexWrap: 'wrap', justifyContent: 'center', width: '100%', marginTop: '12px' }}>
                     {['Sim', 'Não', 'Mais ou menos'].map(txt => (
-                       <button key={txt} onClick={() => { manualSetTranscript(txt); handleUserSubmit('substantive'); }} disabled={isProcessing || isSpeaking} style={{ padding: '8px 16px', background: '#e2e8f0', color: '#334155', border: 'none', borderRadius: '24px', cursor: 'pointer', fontSize: '0.85rem' }}>
+                       <button key={txt} onClick={() => { stopListening(); manualSetTranscript(txt); handleUserSubmit('substantive'); }} disabled={isProcessing || isSpeaking} style={{ padding: '8px 16px', background: '#e2e8f0', color: '#334155', border: 'none', borderRadius: '24px', cursor: 'pointer', fontSize: '0.85rem' }}>
                           {txt}
                        </button>
                     ))}
-                    <button onClick={() => handleUserSubmit('simplify_request')} disabled={isProcessing || isSpeaking} style={{ padding: '8px 16px', background: '#ffe4e6', color: '#be123c', border: 'none', borderRadius: '24px', cursor: 'pointer', fontSize: '0.85rem' }}>
+                    <button onClick={() => { stopListening(); handleUserSubmit('simplify_request'); }} disabled={isProcessing || isSpeaking} style={{ padding: '8px 16px', background: '#ffe4e6', color: '#be123c', border: 'none', borderRadius: '24px', cursor: 'pointer', fontSize: '0.85rem' }}>
                        Explica-me melhor
                     </button>
-                    <button onClick={() => handleUserSubmit('dont_know')} disabled={isProcessing || isSpeaking} style={{ padding: '8px 16px', background: '#f1f5f9', color: '#475569', border: 'none', borderRadius: '24px', cursor: 'pointer', fontSize: '0.85rem' }}>
+                    <button onClick={() => { stopListening(); handleUserSubmit('dont_know'); }} disabled={isProcessing || isSpeaking} style={{ padding: '8px 16px', background: '#f1f5f9', color: '#475569', border: 'none', borderRadius: '24px', cursor: 'pointer', fontSize: '0.85rem' }}>
                        Não sei
                     </button>
                 </div>
@@ -309,22 +330,31 @@ export default function App() {
               </div>
             )}
 
-            <div className="controls" style={{ marginTop: '24px' }}>
-              <button 
-                onClick={() => {
-                  if (state.phase === 'closure_ready') {
-                     updateState({ phase: 'outcome_delivered' });
-                  } else {
-                     handleUserSubmit('auto');
-                  }
-                }}
-                disabled={isProcessing || (mode === 'writing' && !inputText.trim() && state.phase !== 'closure_ready') || (mode === 'conversation' && !transcript.trim() && state.phase !== 'closure_ready')}
-                className="btn-primary"
-                style={{ width: mode === 'conversation' ? '100%' : 'auto', padding: mode === 'conversation' ? '16px' : undefined }}
-              >
-                {state.phase === 'closure_ready' ? 'Ver Leitura Final' : isProcessing ? '...' : (mode === 'conversation' ? 'Avançar com a Transcrição' : 'Continuar')}
-              </button>
-            </div>
+            {mode === 'writing' && (
+              <div className="controls" style={{ marginTop: '24px' }}>
+                <button 
+                  onClick={() => {
+                    if (state.phase === 'closure_ready') {
+                       updateState({ phase: 'outcome_delivered' });
+                    } else {
+                       handleUserSubmit('auto');
+                    }
+                  }}
+                  disabled={isProcessing || (mode === 'writing' && !inputText.trim() && state.phase !== 'closure_ready')}
+                  className="btn-primary"
+                >
+                  {state.phase === 'closure_ready' ? 'Ver Leitura Final' : isProcessing ? 'A processar...' : 'Continuar'}
+                </button>
+              </div>
+            )}
+            
+            {(mode === 'conversation' && state.phase === 'closure_ready') && (
+              <div className="controls" style={{ marginTop: '24px' }}>
+                <button onClick={() => updateState({ phase: 'outcome_delivered' })} className="btn-primary" style={{ width: '100%' }}>
+                   Ver Leitura Final
+                </button>
+              </div>
+            )}
             
             {((phase as string) === 'outcome_delivered') && (
                <div style={{ marginTop: '24px', borderTop: '1px solid #e2e8f0', paddingTop: '16px' }}>

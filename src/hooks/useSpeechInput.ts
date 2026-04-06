@@ -52,20 +52,25 @@ export function useSpeechInput() {
     };
   }, []);
 
+  const startListening = () => {
+    if (isListening) return;
+    setError(null);
+    setTranscript('');
+    try {
+      recognitionRef.current?.start();
+      setIsListening(true);
+    } catch(e) {}
+  };
+
+  const stopListening = () => {
+    if (!isListening) return;
+    recognitionRef.current?.stop();
+    setIsListening(false);
+  };
+
   const toggleListening = () => {
-    if (isListening) {
-      recognitionRef.current?.stop();
-      setIsListening(false);
-    } else {
-      setError(null);
-      setTranscript('');
-      try {
-        recognitionRef.current?.start();
-        setIsListening(true);
-      } catch(e) {
-        // Handle race conditions where it's already started
-      }
-    }
+    if (isListening) stopListening();
+    else startListening();
   };
 
   const manualSetTranscript = (text: string) => {
@@ -77,6 +82,8 @@ export function useSpeechInput() {
     transcript,
     error,
     toggleListening,
+    startListening,
+    stopListening,
     manualSetTranscript,
     isSupported: !!(window.SpeechRecognition || window.webkitSpeechRecognition)
   };

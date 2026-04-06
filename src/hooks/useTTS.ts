@@ -3,7 +3,7 @@ import { useState, useCallback } from 'react';
 export const useTTS = () => {
   const [isSpeaking, setIsSpeaking] = useState(false);
 
-  const speak = useCallback((text: string) => {
+  const speak = useCallback((text: string, onEnd?: () => void) => {
     if (!('speechSynthesis' in window)) {
         console.warn('TTS não suportado no browser atual');
         return;
@@ -27,7 +27,10 @@ export const useTTS = () => {
     utterance.pitch = 1.0;
 
     utterance.onstart = () => setIsSpeaking(true);
-    utterance.onend = () => setIsSpeaking(false);
+    utterance.onend = () => {
+       setIsSpeaking(false);
+       if (onEnd) onEnd();
+    };
     utterance.onerror = () => setIsSpeaking(false);
 
     window.speechSynthesis.speak(utterance);
