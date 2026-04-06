@@ -39,10 +39,10 @@ const makeDummyState = (): InternalState => ({
 });
 
 export async function runLiveTest() {
-  console.log('Forçando VITE_LIVE_MODE e invalidando chave para forçar falha no Provider Real e testar z-fallback.');
+  console.log('Forçando LIVE_MODE e invalidando chave para forçar falha no Provider Real e testar z-fallback.');
   
-  process.env.VITE_LIVE_MODE = 'true';
-  process.env.VITE_OPENAI_API_KEY = 'forced-invalid-key-for-auth-fail-test';
+  process.env.LIVE_MODE = 'true';
+  process.env.OPENAI_API_KEY = 'forced-invalid-key-for-auth-fail-test';
 
   const res = await askLLM({
     internalState: makeDummyState(),
