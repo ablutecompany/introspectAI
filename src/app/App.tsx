@@ -117,6 +117,7 @@ export default function App() {
     } catch (e: any) {
       console.error("API Fetch Failure", e);
       stopListening();
+      stopTTS();
       setConnectionError({ failedText: finalUserText, failedIntent: intent as any });
       setIsProcessing(false);
       return; 
