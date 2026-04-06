@@ -18,7 +18,8 @@ export default function App() {
   const { isListening, transcript, toggleListening, startListening, stopListening, manualSetTranscript, error: sttError, isSupported } = useSpeechInput();
   const { speak, stop: stopTTS, isSpeaking } = useTTS();
   
-  const [currentQuestion, setCurrentQuestion] = useState("");
+  const [currentQuestion, setCurrentQuestion] = useState("Vou precisar que fales comigo.");
+  const [lastMoveType, setLastMoveType] = useState<string | null>(null);
   const [inputText, setInputText] = useState("");
   const [isProcessing, setIsProcessing] = useState(false);
   const [connectionError, setConnectionError] = useState<{ failedText: string, failedIntent: UserIntent | 'auto' } | null>(null);
@@ -152,6 +153,7 @@ export default function App() {
     
     // 5. Update UI
     setCurrentQuestion(response.userFacingText);
+    setLastMoveType(response.nextMoveType || nextMove);
     setInputText("");
     manualSetTranscript(""); // Reseta a transcrição após o envio
     setShowTranscriptInput(false);
@@ -392,7 +394,8 @@ export default function App() {
                 
                 {/* Voice-First Chips Sub-Layer */}
                 <div style={{ display: 'flex', gap: '8px', flexWrap: 'wrap', justifyContent: 'center', width: '100%', marginTop: '12px' }}>
-                    {['Sim', 'Não', 'Mais ou menos'].map(txt => (
+                    {/* Hide Sim/Não generically when engine actively asks an open-text inquiry */}
+                    {!(lastMoveType?.startsWith('ask_')) && ['Sim', 'Não', 'Mais ou menos'].map(txt => (
                        <button key={txt} onClick={() => { stopListening(); manualSetTranscript(txt); handleUserSubmit('substantive'); }} disabled={isProcessing || isSpeaking} style={{ padding: '8px 16px', background: '#e2e8f0', color: '#334155', border: 'none', borderRadius: '24px', cursor: 'pointer', fontSize: '0.85rem' }}>
                           {txt}
                        </button>

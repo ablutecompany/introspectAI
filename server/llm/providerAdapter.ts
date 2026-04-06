@@ -1,11 +1,11 @@
 export class ProviderAdapter {
   static async requestOpenAI(sysPrompt: string, userPrompt: string, reqId: string = 'no-id', retries = 2): Promise<{content: string, providerMode: 'live' | 'mock'}> {
-    const isLive = process.env.LIVE_MODE === 'true';
     const apiKey = process.env.OPENAI_API_KEY;
+    const forceMock = process.env.FORCE_MOCK === 'true';
 
-    // Use Mock unless explicitly flagged for live mode
-    if (!isLive || !apiKey || apiKey === 'undefined') {
-       console.log(`[OpenAI Adapter] ID: ${reqId} | LIVE_MODE is false or API KEY missing. Falling back to MOCK.`);
+    // Use Mock only if strictly forced or locally missing keys
+    if (forceMock || (!apiKey || apiKey === 'undefined')) {
+       console.log(`[OpenAI Adapter] ID: ${reqId} | Missing API KEY or FORCE_MOCK enabled. Falling back to MOCK.`);
        return Promise.resolve({
          content: this.mockJsonResolver(sysPrompt, userPrompt),
          providerMode: 'mock'
@@ -57,19 +57,15 @@ export class ProviderAdapter {
   }
 
   private static mockJsonResolver(sys: string, user: string): string {
-     // Trigger LLM Failure parsing if user text contains magic keyword for mock testing
-     if (user.includes('MOCK_LLM_FAIL')) {
-         return "This is a random text, not JSON, which will trigger the Zod fallback in guards.";
-     }
-     
-     // Simulate real valid JSON matching schema constraints
+     // A mock resolver to test local components if API keys drop
      const forcedMoveMatch = sys.match(/"nextMoveType":\s*"([^"]+)"/);
      const moveInfo = forcedMoveMatch ? forcedMoveMatch[1] : 'ask_open';
      
+     // Returning human-like fallback context instead of purely tech strings, hiding tech jargon from production fails
      return JSON.stringify({
         nextMoveType: moveInfo,
-        userFacingText: `[LLM ZOD VALIDADO] Simulação gerada com tom rigoroso focado na ação: ${moveInfo}.`,
-        extractedSignals: { contexts: [], costs: ["Cansaço Simulado pelo JSON"], fears: [], mechanisms: [] },
+        userFacingText: "Parece que a plataforma está sem chaves de ligação configuradas (Modo Simulação Ativo). Mas percebi a tua indicação diária.",
+        extractedSignals: { contexts: [], costs: [], fears: [], mechanisms: [] },
         suggestedUpdates: { confidenceHint: "moderate" }
      });
   }

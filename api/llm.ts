@@ -19,16 +19,6 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
     // Inject the proxy requestId down to LLM client so logs sync perfectly
     payload._requestId = reqId;
 
-    if (payload.userResponse === 'DEBUG_BYPASS_OPENAI') {
-       console.log(`[Backend API] ID: ${reqId} | BYPASS FLAG MATCHED! Dev mock returning...`);
-       return res.status(200).json({
-          nextMoveType: 'ask_open',
-          userFacingText: '[SMOKE TEST] Passou pela API Vercel! O Vercel Router + Payload está impecável!',
-          extractedSignals: { contexts: [], costs: [], fears: [], mechanisms: [] },
-          suggestedUpdates: { confidenceHint: 'strong' }
-       });
-    }
-
     const response = await askLLM(payload);
     
     console.log(`[Backend API] ID: ${reqId} | Response generated successfully. Sending 200...`);
