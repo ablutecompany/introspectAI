@@ -119,7 +119,31 @@ export function OnboardingWizard({ onComplete, mode, isProcessing }: OnboardingW
      return () => stopTTS();
    }, [currentStepIndex, mode, stopTTS, isSupported, currentStep.question]);
 
+   const finalizeOnboardingExample = (answerPayload: string) => {
+      console.log(`[Onboarding Finalize] Step: 5 | Final Payload: "${answerPayload}"`);
+      
+      stopListening();
+      setUIState('match_success');
+      setFeedbackMsg("Percebi o contexto.");
+      setMatchedChip(answerPayload); // Visually acknowledge if it was a chip
+
+      setTimeout(() => {
+         const newBuffer = [...buffer, answerPayload];
+         setMatchedChip(null);
+         setFeedbackMsg(""); 
+         setUIState('idle'); // Prevent locking
+         
+         const finalTranscript = `[User Context Buffer]: Peso principal: ${newBuffer[0]}. Intensidade: ${newBuffer[1]}. Momento: ${newBuffer[2]}. Tipo de peso: ${newBuffer[3]}. Exemplo dominante: ${newBuffer[4]}`;
+         onComplete(finalTranscript);
+      }, 700); 
+   };
+
    const commitOnboardingAnswer = (stepId: number, rawInput: string, finalChipValue: string) => {
+      if (stepId === 5) {
+         finalizeOnboardingExample(finalChipValue);
+         return;
+      }
+      
       console.log(`[Onboarding Commit] Step: ${stepId} | Raw: "${rawInput}" | Option: "${finalChipValue}"`);
       
       stopListening();
@@ -133,14 +157,9 @@ export function OnboardingWizard({ onComplete, mode, isProcessing }: OnboardingW
          setFeedbackMsg(""); 
          setUIState('idle');
          
-         if (currentStepIndex === ONBOARDING_STEPS.length - 1) {
-           const finalTranscript = `[User Context Buffer]: Peso principal: ${newBuffer[0]}. Intensidade: ${newBuffer[1]}. Momento: ${newBuffer[2]}. Tipo de peso: ${newBuffer[3]}. Exemplo dominante: ${newBuffer[4]}`;
-           onComplete(finalTranscript);
-         } else {
-           setBuffer(newBuffer);
-           setCurrentStepIndex(prev => prev + 1);
-           manualSetTranscript("");
-         }
+         setBuffer(newBuffer);
+         setCurrentStepIndex(prev => prev + 1);
+         manualSetTranscript("");
       }, 700); 
    };
 
@@ -150,11 +169,14 @@ export function OnboardingWizard({ onComplete, mode, isProcessing }: OnboardingW
       
       const normalizedSpeech = normalize(rawSpeech);
 
-      // Secondary safeguard for EAGER MATCH if hardware closed mic instantly before catching it live
+      // NÍVEL B - Secondary safeguard for EAGER MATCH if hardware closed mic instantly before catching it live
       if (currentStepIndex !== 4) {
-         let directMatch = currentStep.chips.find(c => normalize(c) === normalizedSpeech);
+         let directMatch = currentStep.chips.find(c => {
+             const coreLabel = normalize(c.split('/')[0]).trim();
+             return normalizedSpeech.includes(coreLabel);
+         });
          if (directMatch) {
-             console.log(`[Validation Pipeline] Secondary Layer A Match: ${directMatch}`);
+             console.log(`[Validation Pipeline] Secondary Layer A Match (Includes): ${directMatch}`);
              commitOnboardingAnswer(currentStep.step, rawSpeech, directMatch);
              return;
          }
@@ -182,7 +204,8 @@ export function OnboardingWizard({ onComplete, mode, isProcessing }: OnboardingW
          if (data.matchedOptionId && data.matchedOptionId !== 'NO_MATCH' && currentStep.chips.includes(data.matchedOptionId) && data.confidence !== 'low') {
              console.log(`[Validation Pipeline] Layer C AI Match: ${data.matchedOptionId}`);
              if (currentStepIndex === 4) {
-                commitOnboardingAnswer(currentStep.step, rawSpeech, rawSpeech); // preserve free context for Step 5
+                // Step 5 accepts unstructured broad text if AI allows it
+                finalizeOnboardingExample(rawSpeech);
              } else {
                 commitOnboardingAnswer(currentStep.step, rawSpeech, data.matchedOptionId);
              }
@@ -223,19 +246,23 @@ export function OnboardingWizard({ onComplete, mode, isProcessing }: OnboardingW
       const rawSpeech = voiceTranscript;
       const normalizedSpeech = normalize(rawSpeech);
 
-      // 1. INSTANT EAGER LAYER A / B EVALUATION (Real-time hotword trapping)
-      // Fires immediately on every transcript change!
+      // NÍVEL B: INSTANT EAGER LAYER A / B EVALUATION (Real-time hotword trapping in phrase)
+      // Fires immediately on every transcript change! Includes substring capturing.
       if (isListening && rawSpeech.trim().length >= 3 && currentStepIndex !== 4) {
-         let directMatch = currentStep.chips.find(c => normalize(c) === normalizedSpeech);
+         let directMatch = currentStep.chips.find(c => {
+             const coreLabel = normalize(c.split('/')[0]).trim();
+             return normalizedSpeech.includes(coreLabel);
+         });
+         
          if (directMatch) {
-             console.log(`[Realtime Pipeline] Layer A Instant Match: ${directMatch}`);
+             console.log(`[Realtime Pipeline] Layer A Instant Phrase Match: ${directMatch}`);
              commitOnboardingAnswer(currentStep.step, rawSpeech, directMatch);
              return;
          }
 
          let synMatch = currentStep.synonyms.find(syn => syn.match.some(m => normalizedSpeech.includes(normalize(m))));
          if (synMatch) {
-             console.log(`[Realtime Pipeline] Layer B Instant Match: ${synMatch.emit}`);
+             console.log(`[Realtime Pipeline] Layer B Instant Phrase Match: ${synMatch.emit}`);
              commitOnboardingAnswer(currentStep.step, rawSpeech, synMatch.emit);
              return;
          }
@@ -269,10 +296,10 @@ export function OnboardingWizard({ onComplete, mode, isProcessing }: OnboardingW
             {uIState === 'tts_failed' && <div style={{ color: '#ef4444', fontWeight: 600, fontSize:'0.9rem' }}>Não consegui usar a voz. Podes tocar numa opção.</div>}
             {uIState === 'speaking' && <div style={{ color: '#3b82f6', fontWeight: 600 }}>A Falar...</div>}
             {uIState === 'listening' && <div style={{ color: '#ef4444', fontWeight: 600 }}>Estou a ouvir...</div>}
-            {uIState === 'idle' && <div style={{ color: '#64748b', fontWeight: 600 }}>Toca numa opção ou no microfone para falar</div>}
-            {uIState === 'processing_match' && <div style={{ color: '#d97706', fontWeight: 600 }}>A processar a tua resposta...</div>}
-            {uIState === 'match_success' && <div style={{ color: '#22c55e', fontWeight: 600 }}>Percebi.</div>}
-            {uIState === 'match_fail' && <div style={{ color: '#ef4444', fontSize: '0.9rem', textAlign: 'center', fontWeight: 'bold' }}>{feedbackMsg}</div>}
+            {uIState === 'idle' && !isProcessing && <div style={{ color: '#64748b', fontWeight: 600 }}>Toca numa opção ou no microfone para falar</div>}
+            {(uIState === 'processing_match' || isProcessing) && <div style={{ color: '#d97706', fontWeight: 600 }}>A processar a tua resposta...</div>}
+            {uIState === 'match_success' && !isProcessing && <div style={{ color: '#22c55e', fontWeight: 600 }}>Percebi.</div>}
+            {uIState === 'match_fail' && !isProcessing && <div style={{ color: '#ef4444', fontSize: '0.9rem', textAlign: 'center', fontWeight: 'bold' }}>{feedbackMsg}</div>}
          </div>
 
          {/* HONEST BLOCKER for Step 1 missing Gesture */}
@@ -310,8 +337,28 @@ export function OnboardingWizard({ onComplete, mode, isProcessing }: OnboardingW
                </div>
             </div>
          )}
-         
-         {/* Live Transcript Display */}
+                  {/* Writing Fallback for Step 5 */}
+          {mode === 'writing' && currentStepIndex === 4 && (
+             <div style={{ width: '100%', maxWidth: '400px', display: 'flex', flexDirection: 'column', gap: '8px', marginBottom: '16px' }}>
+                <textarea 
+                   autoFocus
+                   disabled={uIState === 'processing_match' || uIState === 'match_success'}
+                   placeholder="Escreve o teu exemplo..."
+                   onKeyDown={(e) => {
+                      if (e.key === 'Enter' && !e.shiftKey) {
+                         e.preventDefault();
+                         finalizeOnboardingExample(e.currentTarget.value);
+                      }
+                   }}
+                   style={{ width: '100%', minHeight: '80px', padding: '12px', borderRadius: '8px', border: '1px solid #cbd5e1', fontSize: '1rem', fontFamily: 'inherit' }}
+                />
+                <div style={{ fontSize: '0.8rem', color: '#64748b', textAlign: 'center' }}>
+                   Pressiona Enter para submeter, ou escolhe uma das opções abaixo.
+                </div>
+             </div>
+          )}
+          
+          {/* Live Transcript Display */}
          {mode === 'conversation' && voiceTranscript && uIState !== 'match_success' && uIState !== 'match_fail' && (
              <div style={{ width: '100%', maxWidth: '400px', background: '#f8fafc', padding: '12px', borderRadius: '8px', marginBottom: '8px', border: '1px solid #e2e8f0' }}>
                  <p style={{ margin: 0, fontSize: '0.95rem', color: '#334155', fontStyle: 'italic', textAlign: 'center' }}>
@@ -328,7 +375,10 @@ export function OnboardingWizard({ onComplete, mode, isProcessing }: OnboardingW
                    <button 
                      key={chipText} 
                      disabled={uIState === 'match_success' || uIState === 'processing_match'}
-                     onClick={() => commitOnboardingAnswer(currentStep.step, `<Toque Direto>`, chipText)}
+                     onClick={() => {
+                         if (currentStepIndex === 4) finalizeOnboardingExample(chipText);
+                         else commitOnboardingAnswer(currentStep.step, `<Toque Direto>`, chipText);
+                     }}
                      style={{ 
                         padding: '12px 20px', 
                         background: isMatched ? '#22c55e' : '#e2e8f0', 
