@@ -7,6 +7,7 @@ import type { UserIntent } from '../engine/classifyInput';
 import { OutcomeEngine } from '../engine/outcomeRules';
 import { useSpeechInput } from '../hooks/useSpeechInput';
 import { ResumeCard } from '../features/session/ResumeCard';
+import { PostSessionFeedback } from '../features/feedback/PostSessionFeedback';
 import { askLLM } from '../../server/llm/client';
 import { DebugPanel } from '../dev/DebugPanel';
 import './index.css';
@@ -134,6 +135,10 @@ export default function App() {
                 setIsResuming(false);
               }}
             />
+            <h4>Resultado Preliminar (Dev Mode):</h4>
+            <pre style={{ fontSize: '0.8em', whiteSpace: 'pre-wrap' }}>
+              {JSON.stringify(OutcomeEngine.calculateOutcome(state).payload, null, 2)}
+            </pre>
          </div>
       );
   }
@@ -247,8 +252,9 @@ export default function App() {
                      Exportar Leitura Interna (Ecossistema)
                   </button>
                   <button onClick={resetSession} style={{ padding: '8px 16px', background: 'transparent', color: '#64748b', border: 'none', cursor: 'pointer', marginLeft: '12px' }}>
-                     Limpar Sessão e Começar de Novo
+                     Limpar Sessão
                   </button>
+                  <PostSessionFeedback onComplete={(feedback) => console.log('Feedback Final:', feedback)} />
                </div>
             )}
           </div>
