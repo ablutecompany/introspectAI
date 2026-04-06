@@ -23,7 +23,9 @@ export class OutcomeChecks {
       const payloadString = JSON.stringify(outcome.payload).toLowerCase();
       const forbiddenWords = [
          'claramente', 'definitivamente', 'tu és', 'obviamente', 'sem dúvida', 
-         'o teu eixo dominante', 'o teu problema é', 'a única razão'
+         'o teu eixo dominante', 'o teu problema é', 'a única razão',
+         'múltiplos eixos', 'ansiedade instalada', 'dinâmicas intrapsíquicas',
+         'estrutura psíquica', 'processos subjacentes', 'mecanismo de defesa clássico'
       ];
       const isTooAffirmative = forbiddenWords.some(w => payloadString.includes(w));
       
