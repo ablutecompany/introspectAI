@@ -1,16 +1,20 @@
 export class ProviderAdapter {
-  static async requestOpenAI(sysPrompt: string, userPrompt: string, retries = 2): Promise<string> {
+  static async requestOpenAI(sysPrompt: string, userPrompt: string, retries = 2): Promise<{content: string, providerMode: 'live' | 'mock'}> {
+    // Explicit environment checker supporting Vite and Node setups
+    const isLive = process.env.VITE_LIVE_MODE === 'true' || import.meta.env?.VITE_LIVE_MODE === 'true';
     const apiKey = typeof process !== 'undefined' ? process.env?.VITE_OPENAI_API_KEY : import.meta.env?.VITE_OPENAI_API_KEY;
 
-    if (!apiKey || apiKey === 'undefined') {
-       // Mock fallback to simulate Real API success/failure depending on prompt.
-       // This validates the schema pipeline without burning credits during tests.
-       return Promise.resolve(this.mockJsonResolver(sysPrompt, userPrompt));
+    // Use Mock unless explicitly flagged for live mode
+    if (!isLive || !apiKey || apiKey === 'undefined') {
+       return Promise.resolve({
+         content: this.mockJsonResolver(sysPrompt, userPrompt),
+         providerMode: 'mock'
+       });
     }
 
     try {
       const controller = new AbortController();
-      const timeoutId = setTimeout(() => controller.abort(), 12000); // 12 seconds timeout
+      const timeoutId = setTimeout(() => controller.abort(), 12000); 
 
       const res = await fetch('https://api.openai.com/v1/chat/completions', {
         method: 'POST',
@@ -34,7 +38,7 @@ export class ProviderAdapter {
       if (!res.ok) throw new Error(`OpenAI API error: ${res.statusText}`);
       
       const data = await res.json();
-      return data.choices[0].message.content;
+      return { content: data.choices[0].message.content, providerMode: 'live' };
 
     } catch (e: any) {
       if (retries > 0) {

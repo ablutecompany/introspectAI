@@ -14,10 +14,14 @@ export async function askLLM(request: AskLLMRequest): Promise<LLMInterviewRespon
   
   // 3. Ask provider
   let rawText = '';
+  let activeProviderMode: 'live' | 'mock' = 'mock';
   try {
-     rawText = await ProviderAdapter.requestOpenAI(system, user);
+     const res = await ProviderAdapter.requestOpenAI(system, user);
+     rawText = res.content;
+     activeProviderMode = res.providerMode;
   } catch (e: any) {
      rawText = `{"error": "API Unreachable", "details": "${e.message}"}`; // Generates a Zod fail purposely if no catch configured
+     activeProviderMode = 'live'; // Fails contextually inside live attempt
   }
 
   const latency = Date.now() - startTime;
@@ -27,7 +31,9 @@ export async function askLLM(request: AskLLMRequest): Promise<LLMInterviewRespon
      sessionId: request.internalState.sessionId,
      turnIndex: request.internalState.turnIndex,
      phase: request.internalState.phase,
-     latency
+     latency,
+     inputType: request.inputType || 'typed',
+     providerMode: activeProviderMode
   });
 
   return finalResponse;

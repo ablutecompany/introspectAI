@@ -25,8 +25,9 @@ export interface LLMInterviewResponse {
 }
 
 export interface AskLLMRequest {
-  internalState: any; // Mapped to InternalState on the server
-  userResponse: string; 
-  userIntent: 'vague' | 'deflective' | 'substantive' | 'dont_know';
+  internalState: any; // Mapped dynamically to InternalState on Backend
+  userResponse: string;
+  userIntent: 'vague' | 'deflective' | 'substantive' | 'dont_know' | 'simplify_request' | 'not_me_request';
   forcedNextMove?: LLMNextMoveType;
+  inputType?: 'typed' | 'transcribed' | 'corrected_transcript';
 }

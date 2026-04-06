@@ -1,15 +1,18 @@
-import { useState } from 'react';
+import { useState, useRef } from 'react';
 import { useSessionStore } from '../store/useSessionStore';
 import { ConductorEngine } from '../engine/conductor';
 import { StateUpdater } from '../engine/updateState';
-import { InputClassifier, UserIntent } from '../engine/classifyInput';
+import { InputClassifier } from '../engine/classifyInput';
+import type { UserIntent } from '../engine/classifyInput';
 import { OutcomeEngine } from '../engine/outcomeRules';
+import { useSpeechInput } from '../hooks/useSpeechInput';
 import { askLLM } from '../../server/llm/client';
 import { DebugPanel } from '../dev/DebugPanel';
 import './index.css';
 
 export default function App() {
   const { mode, setMode, phase, turnIndex, updateState, incrementTurn } = useSessionStore();
+  const { isListening, transcript, toggleListening, manualSetTranscript, error: sttError, isSupported } = useSpeechInput();
   
   const [currentQuestion, setCurrentQuestion] = useState("O que te trouxe aqui hoje? Onde sentes que está o peso maior?");
   const [inputText, setInputText] = useState("");
@@ -21,33 +24,38 @@ export default function App() {
   };
 
   const handleUserSubmit = async (rawIntent: UserIntent | 'auto' = 'auto') => {
-    if (!inputText.trim() && rawIntent === 'auto') return;
+    const isVoiceTurn = mode === 'conversation' && rawIntent === 'auto';
+    const finalUserText = isVoiceTurn ? transcript : inputText;
+
+    if (!finalUserText.trim() && rawIntent === 'auto') return;
     
     setIsProcessing(true);
     const state = useSessionStore.getState();
 
     // 1. Classify
-    const textToClassify = rawIntent === 'auto' ? inputText : String(rawIntent);
+    const textToClassify = rawIntent === 'auto' ? finalUserText : String(rawIntent);
     const intent = rawIntent !== 'auto' ? rawIntent : InputClassifier.classify(textToClassify);
     
     // 2. Conductor decides next move
-    const nextMove = ConductorEngine.decideNextMove(state, intent);
+    const nextMove = ConductorEngine.decideNextMove(state, intent as any);
     
-    // 3. Ask LLM Mock
+    // 3. Ask LLM live Endpoint
     const response = await askLLM({
       internalState: state,
-      userResponse: inputText,
-      userIntent: intent,
-      forcedNextMove: nextMove
+      userResponse: finalUserText,
+      userIntent: intent as any,
+      forcedNextMove: nextMove,
+      inputType: mode === 'conversation' ? (transcript !== finalUserText ? 'corrected_transcript' : 'transcribed') : 'typed'
     });
     
     // 4. Update the real state
-    const stateUpdates = StateUpdater.enrich(state, intent, response);
+    const stateUpdates = StateUpdater.enrich(state, intent as any, response);
     updateState(stateUpdates);
     
     // 5. Update UI
     setCurrentQuestion(response.userFacingText);
     setInputText("");
+    manualSetTranscript(""); // Reseta a transcrição após o envio
     incrementTurn();
     setIsProcessing(false);
   };
@@ -127,8 +135,37 @@ export default function App() {
                 disabled={isProcessing}
               />
             ) : (
-              <div className="audio-mock">
-                [Modo Voz: Interface de Escuta Ativa (Mock)]
+              <div className="audio-live-container" style={{ display: 'flex', flexDirection: 'column', gap: 12 }}>
+                {!isSupported && <div style={{ color: '#f00', fontSize: 12 }}>Microfone não suportado pelo browser. Usa Escrita.</div>}
+                
+                <div style={{ display: 'flex', alignItems: 'center', gap: 12 }}>
+                   <button 
+                     onClick={toggleListening} 
+                     disabled={!isSupported || isProcessing}
+                     style={{
+                        padding: '12px 24px', 
+                        borderRadius: 30, 
+                        border: 'none', 
+                        background: isListening ? '#ef4444' : '#fff',
+                        color: isListening ? '#fff' : '#000',
+                        cursor: 'pointer',
+                        fontWeight: 'bold',
+                        transition: '0.2s all'
+                     }}
+                   >
+                      {isListening ? 'A ouvir... (Clique para parar)' : 'Falar'}
+                   </button>
+                   {sttError && <span style={{color: '#ef4444', fontSize: 12}}>{sttError}</span>}
+                </div>
+
+                {/* Edit STT text directly before submit */}
+                <textarea
+                  value={transcript}
+                  onChange={(e) => manualSetTranscript(e.target.value)}
+                  placeholder="A tua voz aparecerá aqui..."
+                  disabled={isProcessing || isListening}
+                  style={{ minHeight: 80 }}
+                />
               </div>
             )}
 
@@ -165,7 +202,7 @@ export default function App() {
                      handleUserSubmit('auto');
                   }
                 }}
-                disabled={isProcessing || (!inputText.trim() && mode === 'writing' && state.phase !== 'closure_ready')}
+                disabled={isProcessing || (mode === 'writing' && !inputText.trim() && state.phase !== 'closure_ready') || (mode === 'conversation' && !transcript.trim() && state.phase !== 'closure_ready')}
                 className="btn-primary"
               >
                 {state.phase === 'closure_ready' ? 'Ver Leitura' : isProcessing ? '...' : 'Continuar'}

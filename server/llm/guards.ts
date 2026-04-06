@@ -7,7 +7,7 @@ export class LLMGuard {
   static validate(
     rawText: string, 
     requestedMove: LLMNextMoveType, 
-    context: { sessionId: string; turnIndex: number; phase: string; latency: number }
+    context: { sessionId: string; turnIndex: number; phase: string; latency: number, inputType: string, providerMode: 'live'|'mock' }
   ): LLMInterviewResponse {
     
     try {
@@ -30,6 +30,8 @@ export class LLMGuard {
         turnIndex: context.turnIndex,
         phase: context.phase,
         requestedMove,
+        inputType: context.inputType,
+        providerMode: context.providerMode,
         rawLLMResponse: cleanedText,
         validatedOutcome: JSON.stringify(validated),
         fallbackTriggered: false,
@@ -46,6 +48,8 @@ export class LLMGuard {
         turnIndex: context.turnIndex,
         phase: context.phase,
         requestedMove,
+        inputType: context.inputType,
+        providerMode: context.providerMode,
         rawLLMResponse: rawText,
         fallbackTriggered: true,
         error: error?.message || 'JSON Parse Schema Mismatch',
