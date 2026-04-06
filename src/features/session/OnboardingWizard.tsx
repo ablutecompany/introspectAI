@@ -9,7 +9,7 @@ const ONBOARDING_STEPS = [
     chips: ["Cansaço / sem energia", "Ansiedade / constante", "Problemas com outras pessoas", "Sinto-me bloqueado", "Ando perdido", "Não sei bem explicar"],
     synonyms: [
        { match: ['cansado', 'energia', 'exausto', 'esgotado', 'fadiga'], emit: 'Cansaço / sem energia' },
-       { match: ['ansioso', 'nervoso', 'cabeça', 'pensar', 'stress'], emit: 'Ansiedade / constante' },
+       { match: ['ansiedade', 'ansioso', 'nervoso', 'cabeça', 'pensar', 'stress'], emit: 'Ansiedade / constante' },
        { match: ['pessoas', 'alguém', 'relação', 'conflito', 'namorado', 'namorada', 'chefe'], emit: 'Problemas com outras pessoas' },
        { match: ['bloqueado', 'preso', 'parado', 'estagnado'], emit: 'Sinto-me bloqueado' },
        { match: ['perdido', 'rumo', 'orientação', 'confuso'], emit: 'Ando perdido' },
@@ -21,8 +21,8 @@ const ONBOARDING_STEPS = [
     question: "Isto tem-te pesado quanto?",
     chips: ["Muito", "Bastante", "Mais ou menos", "Vai e vem", "É difícil dizer"],
     synonyms: [
-       { match: ['imenso', 'fortemente', 'absurdo', 'péssimo', 'horrível', 'pesado'], emit: 'Muito' },
-       { match: ['um bocado', 'algum', 'significativo'], emit: 'Bastante' },
+       { match: ['muito', 'imenso', 'fortemente', 'absurdo', 'péssimo', 'horrível', 'pesado'], emit: 'Muito' },
+       { match: ['bastante', 'um bocado', 'algum', 'significativo'], emit: 'Bastante' },
        { match: ['meio', 'razoável', 'médio', 'pouco'], emit: 'Mais ou menos' },
        { match: ['às vezes', 'depende', 'oscila', 'fases'], emit: 'Vai e vem' },
        { match: ['não sei', 'difícil dizer', 'complica'], emit: 'É difícil dizer' }
@@ -118,38 +118,68 @@ export function OnboardingWizard({ onComplete, mode, isProcessing }: OnboardingW
      return () => stopTTS();
    }, [currentStepIndex, mode, stopTTS, isSupported, currentStep.question]);
 
+   const commitOnboardingAnswer = (stepId: number, rawInput: string, finalChipValue: string) => {
+      console.log(`[Onboarding Commit] Step: ${stepId} | Raw: "${rawInput}" | Option: "${finalChipValue}"`);
+      
+      stopListening();
+      setUIState('match_success');
+      setFeedbackMsg("Percebi.");
+      setMatchedChip(finalChipValue);
+
+      setTimeout(() => {
+         const newBuffer = [...buffer, finalChipValue];
+         setMatchedChip(null);
+         setFeedbackMsg(""); 
+         setUIState('idle');
+         
+         if (currentStepIndex === ONBOARDING_STEPS.length - 1) {
+           const finalTranscript = `[User Context Buffer]: Peso principal: ${newBuffer[0]}. Intensidade: ${newBuffer[1]}. Momento: ${newBuffer[2]}. Tipo de peso: ${newBuffer[3]}. Exemplo dominante: ${newBuffer[4]}`;
+           onComplete(finalTranscript);
+         } else {
+           setBuffer(newBuffer);
+           setCurrentStepIndex(prev => prev + 1);
+           manualSetTranscript("");
+         }
+      }, 700); 
+   };
+
    // Handle Semantic Matching and Silence Trigger
    useEffect(() => {
       if (mode !== 'conversation' || !isListening || voiceTranscript.trim().length < 3 || uIState === 'processing_match') return;
       
+      const rawSpeech = voiceTranscript;
+      const normalizedSpeech = normalize(rawSpeech);
+
+      if (currentStepIndex === 4) {
+         // Open speech -> wait for silence only
+      } else {
+         // EAGER LAYER A / B EVALUATION - Real-time hotword trapping
+         let directMatch = currentStep.chips.find(c => normalize(c) === normalizedSpeech);
+         if (directMatch) {
+             console.log(`[Realtime Pipeline] Layer A Instant Match: ${directMatch}`);
+             commitOnboardingAnswer(currentStep.step, rawSpeech, directMatch);
+             return;
+         }
+
+         let synMatch = currentStep.synonyms.find(syn => syn.match.some(m => normalizedSpeech.includes(normalize(m))));
+         if (synMatch) {
+             console.log(`[Realtime Pipeline] Layer B Instant Match: ${synMatch.emit}`);
+             commitOnboardingAnswer(currentStep.step, rawSpeech, synMatch.emit);
+             return;
+         }
+      }
+      
+      // Silence trigger for fallback matching
       const timeout = setTimeout(async () => {
          stopListening();
-         const rawSpeech = voiceTranscript;
-         const normalizedSpeech = normalize(rawSpeech);
          
          if (currentStepIndex === 4) {
-            handleSelection(rawSpeech);
+            commitOnboardingAnswer(currentStep.step, rawSpeech, rawSpeech);
             return;
          }
 
          setUIState('processing_match');
          setFeedbackMsg("A compreender resposta...");
-
-         // LAYER A
-         let layerAMatch = currentStep.chips.find(c => normalize(c) === normalizedSpeech);
-         if (layerAMatch) {
-             executeMatchAnimation(layerAMatch);
-             return;
-         }
-
-         // LAYER B
-         const matchObj = currentStep.synonyms.find(syn => 
-            syn.match.some(m => normalizedSpeech.includes(normalize(m)))
-         );
-         if (matchObj) {
-            executeMatchAnimation(matchObj.emit);
-            return;
-         }
 
          // LAYER C (OpenAI)
          try {
@@ -161,7 +191,8 @@ export function OnboardingWizard({ onComplete, mode, isProcessing }: OnboardingW
             const data = await apiReq.json();
             
             if (data.matchedOptionId && data.matchedOptionId !== 'NO_MATCH' && currentStep.chips.includes(data.matchedOptionId) && data.confidence !== 'low') {
-                executeMatchAnimation(data.matchedOptionId);
+                console.log(`[Validation Pipeline] Layer C AI Match: ${data.matchedOptionId}`);
+                commitOnboardingAnswer(currentStep.step, rawSpeech, data.matchedOptionId);
                 return;
             }
          } catch (e) {
@@ -169,6 +200,7 @@ export function OnboardingWizard({ onComplete, mode, isProcessing }: OnboardingW
          }
 
          // FAILURE - NO MATCH
+         console.log(`[Validation Pipeline] Failed all layers for: ${rawSpeech}. Waiting for precise retry.`);
          setUIState('match_fail');
          setFeedbackMsg("Ainda estou nesta pergunta. Podes dizer qual das opções ou tocar diretamente.");
          manualSetTranscript(""); 
@@ -183,34 +215,6 @@ export function OnboardingWizard({ onComplete, mode, isProcessing }: OnboardingW
 
       return () => clearTimeout(timeout);
    }, [voiceTranscript, isListening, mode, currentStepIndex]);
-
-   const executeMatchAnimation = (resolvedChip: string) => {
-      setMatchedChip(resolvedChip);
-      setUIState('match_success');
-      setFeedbackMsg("Percebi.");
-      manualSetTranscript("");
-      
-      setTimeout(() => {
-         setMatchedChip(null);
-         handleSelection(resolvedChip);
-      }, 1000); 
-   };
-
-   const handleSelection = (answer: string) => {
-     const newBuffer = [...buffer, answer];
-     setFeedbackMsg(""); 
-     setUIState('idle');
-     stopListening();
-     
-     if (currentStepIndex === ONBOARDING_STEPS.length - 1) {
-       const finalTranscript = `[User Context Buffer]: Peso principal: ${newBuffer[0]}. Intensidade: ${newBuffer[1]}. Momento: ${newBuffer[2]}. Tipo de peso: ${newBuffer[3]}. Exemplo dominante: ${newBuffer[4]}`;
-       onComplete(finalTranscript);
-     } else {
-       setBuffer(newBuffer);
-       setCurrentStepIndex(prev => prev + 1);
-       manualSetTranscript("");
-     }
-   };
 
    return (
       <div className="audio-live-container" style={{ display: 'flex', flexDirection: 'column', gap: 24, padding: '16px 0', alignItems: 'center' }}>
@@ -282,8 +286,8 @@ export function OnboardingWizard({ onComplete, mode, isProcessing }: OnboardingW
                 return (
                    <button 
                      key={chipText} 
-                     disabled={isProcessing || uIState === 'processing_match'}
-                     onClick={() => handleSelection(chipText)}
+                     disabled={uIState === 'match_success' || uIState === 'processing_match'}
+                     onClick={() => commitOnboardingAnswer(currentStep.step, `<Toque Direto>`, chipText)}
                      style={{ 
                         padding: '12px 20px', 
                         background: isMatched ? '#22c55e' : '#e2e8f0', 
