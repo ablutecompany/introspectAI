@@ -8,12 +8,12 @@ const ONBOARDING_STEPS = [
     question: "Antes de começarmos, ajuda-me a perceber onde está o peso maior neste momento.",
     chips: ["Cansaço / sem energia", "Ansiedade / constante", "Problemas com outras pessoas", "Sinto-me bloqueado", "Ando perdido", "Não sei bem explicar"],
     synonyms: [
-       { match: ['cansado', 'energia', 'exausto', 'esgotado', 'fadiga'], emit: 'Cansaço / sem energia' },
-       { match: ['ansiedade', 'ansioso', 'nervoso', 'cabeça', 'pensar', 'stress'], emit: 'Ansiedade / constante' },
-       { match: ['pessoas', 'alguém', 'relação', 'conflito', 'namorado', 'namorada', 'chefe'], emit: 'Problemas com outras pessoas' },
-       { match: ['bloqueado', 'preso', 'parado', 'estagnado'], emit: 'Sinto-me bloqueado' },
-       { match: ['perdido', 'rumo', 'orientação', 'confuso'], emit: 'Ando perdido' },
-       { match: ['não sei', 'explicar', 'difícil'], emit: 'Não sei bem explicar' }
+       { match: ['cansaço', 'cansado', 'energia', 'exausto', 'esgotado', 'fadiga', 'quebrado', 'lento'], emit: 'Cansaço / sem energia' },
+       { match: ['ansiedade', 'ansioso', 'nervoso', 'cabeça', 'pensar', 'stress', 'pânico', 'pressão'], emit: 'Ansiedade / constante' },
+       { match: ['pessoas', 'alguém', 'relação', 'conflito', 'namorado', 'namorada', 'chefe', 'marido', 'amigos'], emit: 'Problemas com outras pessoas' },
+       { match: ['bloqueado', 'preso', 'parado', 'estagnado', 'limbo'], emit: 'Sinto-me bloqueado' },
+       { match: ['perdido', 'rumo', 'orientação', 'confuso', 'sem direção'], emit: 'Ando perdido' },
+       { match: ['não sei', 'explicar', 'difícil', 'estranho'], emit: 'Não sei bem explicar' }
     ]
   },
   {
@@ -46,11 +46,11 @@ const ONBOARDING_STEPS = [
     question: "Isto pesa-te mais como quê?",
     chips: ["Cansaço", "Medo", "Pressão", "Confusão", "Mistura de tudo", "Não sei explicar"],
     synonyms: [
-       { match: ['corpo', 'fadiga', 'dormir'], emit: 'Cansaço' },
-       { match: ['receio', 'assustado', 'pânico', 'fobia'], emit: 'Medo' },
-       { match: ['peso', 'cobrança', 'responsabilidade', 'stress'], emit: 'Pressão' },
-       { match: ['dúvida', 'vazio', 'pensamento'], emit: 'Confusão' },
-       { match: ['mistura', 'tudo', 'vários', 'combo', 'tudo misturado'], emit: 'Mistura de tudo' },
+       { match: ['cansaço', 'corpo', 'fadiga', 'dormir', 'físico'], emit: 'Cansaço' },
+       { match: ['receio', 'assustado', 'pânico', 'fobia', 'medo', 'ansiedade'], emit: 'Medo' },
+       { match: ['peso', 'cobrança', 'responsabilidade', 'stress', 'pressão'], emit: 'Pressão' },
+       { match: ['dúvida', 'vazio', 'pensamento', 'confusão', 'paranóia'], emit: 'Confusão' },
+       { match: ['mistura', 'tudo', 'vários', 'combo', 'tudo misturado', 'várias'], emit: 'Mistura de tudo' },
        { match: ['não sei', 'difícil'], emit: 'Não sei explicar' }
     ]
   },
@@ -144,17 +144,88 @@ export function OnboardingWizard({ onComplete, mode, isProcessing }: OnboardingW
       }, 700); 
    };
 
+   const evaluateMatch = async (rawSpeech: string) => {
+      if (uIState === 'processing_match') return;
+      stopListening(); // Force mic stop completely to guarantee no hardware loops
+      
+      const normalizedSpeech = normalize(rawSpeech);
+
+      // Secondary safeguard for EAGER MATCH if hardware closed mic instantly before catching it live
+      if (currentStepIndex !== 4) {
+         let directMatch = currentStep.chips.find(c => normalize(c) === normalizedSpeech);
+         if (directMatch) {
+             console.log(`[Validation Pipeline] Secondary Layer A Match: ${directMatch}`);
+             commitOnboardingAnswer(currentStep.step, rawSpeech, directMatch);
+             return;
+         }
+
+         let synMatch = currentStep.synonyms.find(syn => syn.match.some(m => normalizedSpeech.includes(normalize(m))));
+         if (synMatch) {
+             console.log(`[Validation Pipeline] Secondary Layer B Match: ${synMatch.emit}`);
+             commitOnboardingAnswer(currentStep.step, rawSpeech, synMatch.emit);
+             return;
+         }
+      }
+
+      setUIState('processing_match');
+      setFeedbackMsg("A compreender resposta...");
+
+      // LAYER C (OpenAI) - Also applies broad screening for Step 5
+      try {
+         const apiReq = await fetch('/api/match', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ userVoice: rawSpeech, validOptions: currentStep.chips, stepQuestion: currentStep.question })
+         });
+         const data = await apiReq.json();
+         
+         if (data.matchedOptionId && data.matchedOptionId !== 'NO_MATCH' && currentStep.chips.includes(data.matchedOptionId) && data.confidence !== 'low') {
+             console.log(`[Validation Pipeline] Layer C AI Match: ${data.matchedOptionId}`);
+             if (currentStepIndex === 4) {
+                commitOnboardingAnswer(currentStep.step, rawSpeech, rawSpeech); // preserve free context for Step 5
+             } else {
+                commitOnboardingAnswer(currentStep.step, rawSpeech, data.matchedOptionId);
+             }
+             return;
+         }
+      } catch (e) {
+         console.error('[Validation Pipeline] Layer C block fail', e);
+      }
+
+      // FAILURE - NO MATCH RECENTERING
+      console.log(`[Validation Pipeline] Failed all layers for: ${rawSpeech}. Triggering RECENTER.`);
+      setUIState('match_fail');
+      
+      const recenterMsg = currentStepIndex === 4 
+         ? "Dá-me um exemplo um pouco mais concreto dentro destas áreas visíveis." 
+         : "Lamento, mas para esta avaliação funcionar tens de escolher uma das opções que tens no ecrã.";
+         
+      setFeedbackMsg(recenterMsg);
+      manualSetTranscript(""); 
+      
+      speak(recenterMsg, 
+        () => setUIState('speaking'),
+        () => { 
+           // DO NOT RE-OPEN MIC AUTOMATICALLY. Force the user to manual act to prevent limbo.
+           setFeedbackMsg(""); 
+           setUIState('idle'); 
+        },
+        () => { setUIState('tts_failed'); },
+        1.10
+      );
+   };
+
    // Handle Semantic Matching and Silence Trigger
    useEffect(() => {
-      if (mode !== 'conversation' || !isListening || voiceTranscript.trim().length < 3 || uIState === 'processing_match') return;
-      
+      // We only track transcript length when listening
+      if (mode !== 'conversation' || uIState === 'processing_match') return;
+
       const rawSpeech = voiceTranscript;
       const normalizedSpeech = normalize(rawSpeech);
 
-      if (currentStepIndex === 4) {
-         // Open speech -> wait for silence only to hit Layer C broad screening mapping
-      } else {
-         // EAGER LAYER A / B EVALUATION - Real-time hotword trapping
+      // 1. INSTANT EAGER LAYER A / B EVALUATION (Real-time hotword trapping)
+      // Fires immediately on every transcript change!
+      if (isListening && rawSpeech.trim().length >= 3 && currentStepIndex !== 4) {
          let directMatch = currentStep.chips.find(c => normalize(c) === normalizedSpeech);
          if (directMatch) {
              console.log(`[Realtime Pipeline] Layer A Instant Match: ${directMatch}`);
@@ -169,57 +240,21 @@ export function OnboardingWizard({ onComplete, mode, isProcessing }: OnboardingW
              return;
          }
       }
-      
-      const timeout = setTimeout(async () => {
-         stopListening();
-         
-         setUIState('processing_match');
-         setFeedbackMsg("A compreender resposta...");
 
-         // LAYER C (OpenAI) - Also applies broad screening for Step 5
-         try {
-            const apiReq = await fetch('/api/match', {
-               method: 'POST',
-               headers: { 'Content-Type': 'application/json' },
-               body: JSON.stringify({ userVoice: rawSpeech, validOptions: currentStep.chips, stepQuestion: currentStep.question })
-            });
-            const data = await apiReq.json();
-            
-            if (data.matchedOptionId && data.matchedOptionId !== 'NO_MATCH' && currentStep.chips.includes(data.matchedOptionId) && data.confidence !== 'low') {
-                console.log(`[Validation Pipeline] Layer C AI Match: ${data.matchedOptionId}`);
-                if (currentStepIndex === 4) {
-                   commitOnboardingAnswer(currentStep.step, rawSpeech, rawSpeech); // preserve free context for Step 5
-                } else {
-                   commitOnboardingAnswer(currentStep.step, rawSpeech, data.matchedOptionId);
-                }
-                return;
-            }
-         } catch (e) {
-            console.error('[Validation Pipeline] Layer C block fail', e);
-         }
+      // 2. TIMEOUT OR MICROPHONE CLOSED FALLBACK (Layer C + NO MATCH)
+      // If the mic closes natively and there is a valid transcript string sitting there, evaluate immediately!
+      if (!isListening && rawSpeech.trim().length >= 3 && uIState === 'listening') {
+         evaluateMatch(rawSpeech);
+         return;
+      }
 
-         // FAILURE - NO MATCH RECENTERING
-         console.log(`[Validation Pipeline] Failed all layers for: ${rawSpeech}. Triggering RECENTER.`);
-         setUIState('match_fail');
-         
-         const recenterMsg = currentStepIndex === 4 
-            ? "Dá-me um exemplo um pouco mais concreto dentro destas áreas visíveis." 
-            : "Lamento, mas para esta avaliação funcionar tens de escolher uma das opções que tens no ecrã.";
-            
-         setFeedbackMsg(recenterMsg);
-         manualSetTranscript(""); 
-         
-         speak(recenterMsg, 
-           () => setUIState('speaking'),
-           () => { setFeedbackMsg(""); setUIState('listening'); startListening(); },
-           () => { setUIState('tts_failed'); },
-           1.10
-         );
-
-      }, 1800); 
-
-      return () => clearTimeout(timeout);
-   }, [voiceTranscript, isListening, mode, currentStepIndex]);
+      if (isListening && rawSpeech.trim().length >= 3) {
+         const timeout = setTimeout(() => {
+            evaluateMatch(rawSpeech);
+         }, 1800); 
+         return () => clearTimeout(timeout);
+      }
+   }, [voiceTranscript, isListening, mode, currentStepIndex, uIState]);
 
    return (
       <div className="audio-live-container" style={{ display: 'flex', flexDirection: 'column', gap: 24, padding: '16px 0', alignItems: 'center' }}>
@@ -234,9 +269,10 @@ export function OnboardingWizard({ onComplete, mode, isProcessing }: OnboardingW
             {uIState === 'tts_failed' && <div style={{ color: '#ef4444', fontWeight: 600, fontSize:'0.9rem' }}>Não consegui usar a voz. Podes tocar numa opção.</div>}
             {uIState === 'speaking' && <div style={{ color: '#3b82f6', fontWeight: 600 }}>A Falar...</div>}
             {uIState === 'listening' && <div style={{ color: '#ef4444', fontWeight: 600 }}>Estou a ouvir...</div>}
+            {uIState === 'idle' && <div style={{ color: '#64748b', fontWeight: 600 }}>Toca numa opção ou no microfone para falar</div>}
             {uIState === 'processing_match' && <div style={{ color: '#d97706', fontWeight: 600 }}>A processar a tua resposta...</div>}
             {uIState === 'match_success' && <div style={{ color: '#22c55e', fontWeight: 600 }}>Percebi.</div>}
-            {uIState === 'match_fail' && <div style={{ color: '#ef4444', fontSize: '0.9rem', textAlign: 'center' }}>{feedbackMsg}</div>}
+            {uIState === 'match_fail' && <div style={{ color: '#ef4444', fontSize: '0.9rem', textAlign: 'center', fontWeight: 'bold' }}>{feedbackMsg}</div>}
          </div>
 
          {/* HONEST BLOCKER for Step 1 missing Gesture */}
