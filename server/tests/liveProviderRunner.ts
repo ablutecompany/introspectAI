@@ -1,5 +1,5 @@
-import { askLLM } from '../llm/client';
-import type { InternalState } from '../../src/types/internalState';
+import { askLLM } from '../llm/client.js';
+import type { InternalState } from '../../src/types/internalState.js';
 
 const makeDummyState = (): InternalState => ({
   sessionId: 'live-test-1',

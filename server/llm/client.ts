@@ -1,7 +1,7 @@
-import type { AskLLMRequest, LLMInterviewResponse } from '../../shared/contracts/interviewContract';
-import { PromptBuilder } from './promptBuilder';
-import { ProviderAdapter } from './providerAdapter';
-import { LLMGuard } from './guards';
+import type { AskLLMRequest, LLMInterviewResponse } from '../../shared/contracts/interviewContract.js';
+import { PromptBuilder } from './promptBuilder.js';
+import { ProviderAdapter } from './providerAdapter.js';
+import { LLMGuard } from './guards.js';
 
 export async function askLLM(request: AskLLMRequest & { _requestId?: string }): Promise<LLMInterviewResponse> {
   const startTime = Date.now();

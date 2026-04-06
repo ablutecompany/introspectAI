@@ -1,7 +1,7 @@
-import { LLMInterviewResponseSchema } from './schemas';
-import { FALLBACKS } from './fallbacks';
-import type { LLMInterviewResponse, LLMNextMoveType } from '../../shared/contracts/interviewContract';
-import { SessionLogger } from '../logging/sessionLogger';
+import { LLMInterviewResponseSchema } from './schemas.js';
+import { FALLBACKS } from './fallbacks.js';
+import type { LLMInterviewResponse, LLMNextMoveType } from '../../shared/contracts/interviewContract.js';
+import { SessionLogger } from '../logging/sessionLogger.js';
 
 export class LLMGuard {
   static validate(

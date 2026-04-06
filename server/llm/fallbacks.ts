@@ -1,4 +1,4 @@
-import type { LLMNextMoveType, LLMInterviewResponse } from '../../shared/contracts/interviewContract';
+import type { LLMNextMoveType, LLMInterviewResponse } from '../../shared/contracts/interviewContract.js';
 
 export const FALLBACKS: Record<LLMNextMoveType, LLMInterviewResponse> = {
   ask_open: {

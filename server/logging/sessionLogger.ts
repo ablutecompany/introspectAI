@@ -1,4 +1,4 @@
-import type { LLMNextMoveType } from '../../shared/contracts/interviewContract';
+import type { LLMNextMoveType } from '../../shared/contracts/interviewContract.js';
 
 export interface AuditLogEntry {
   timestamp: string;

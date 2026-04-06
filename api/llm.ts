@@ -1,5 +1,5 @@
 import type { VercelRequest, VercelResponse } from '@vercel/node';
-import { askLLM } from '../server/llm/client';
+import { askLLM } from '../server/llm/client.js';
 
 export default async function handler(req: VercelRequest, res: VercelResponse) {
   const reqId = (req.headers['x-request-id'] || req.headers['x-vercel-id'] || 'no-id') as string;

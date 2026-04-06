@@ -1,5 +1,5 @@
-import type { InternalState } from '../../src/types/internalState';
-import type { LLMNextMoveType } from '../../shared/contracts/interviewContract';
+import type { InternalState } from '../../src/types/internalState.js';
+import type { LLMNextMoveType } from '../../shared/contracts/interviewContract.js';
 
 export class PromptBuilder {
   static build(
