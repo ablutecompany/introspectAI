@@ -1,8 +1,6 @@
 import type { VercelRequest, VercelResponse } from '@vercel/node';
 import { askLLM } from '../server/llm/client';
 
-export const maxDuration = 60; // Max Allowed Time on Vercel Hobby Tier for Serverless Functions
-
 export default async function handler(req: VercelRequest, res: VercelResponse) {
   const reqId = (req.headers['x-request-id'] || req.headers['x-vercel-id'] || 'no-id') as string;
   console.log(`[Backend API] Request ID: ${reqId} | Method: ${req.method} | Body Payload Valid: ${!!req.body}`);
