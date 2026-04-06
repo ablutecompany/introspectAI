@@ -4,7 +4,7 @@ export const useTTS = () => {
   const [isSpeaking, setIsSpeaking] = useState(false);
   const [ttsError, setTtsError] = useState<string | null>(null);
 
-  const speak = useCallback((text: string, onStartCallback?: () => void, onEndCallback?: () => void, onErrorCallback?: () => void) => {
+  const speak = useCallback((text: string, onStartCallback?: () => void, onEndCallback?: () => void, onErrorCallback?: () => void, rate: number = 1.02) => {
     if (!('speechSynthesis' in window)) {
         console.warn('TTS não suportado no browser atual');
         if (onErrorCallback) onErrorCallback();
@@ -22,7 +22,7 @@ export const useTTS = () => {
     if (ptVoice) utterance.voice = ptVoice;
     
     utterance.lang = 'pt-PT';
-    utterance.rate = 0.95; 
+    utterance.rate = rate; 
     utterance.pitch = 1.0;
 
     let hasStarted = false;

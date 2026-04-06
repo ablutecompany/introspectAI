@@ -101,7 +101,8 @@ export function OnboardingWizard({ onComplete, mode, isProcessing }: OnboardingW
          () => {
             // onError / Timeouts
             setUIState('tts_failed');
-         }
+         },
+         1.10
        );
    };
 
@@ -151,7 +152,7 @@ export function OnboardingWizard({ onComplete, mode, isProcessing }: OnboardingW
       const normalizedSpeech = normalize(rawSpeech);
 
       if (currentStepIndex === 4) {
-         // Open speech -> wait for silence only
+         // Open speech -> wait for silence only to hit Layer C broad screening mapping
       } else {
          // EAGER LAYER A / B EVALUATION - Real-time hotword trapping
          let directMatch = currentStep.chips.find(c => normalize(c) === normalizedSpeech);
@@ -169,19 +170,13 @@ export function OnboardingWizard({ onComplete, mode, isProcessing }: OnboardingW
          }
       }
       
-      // Silence trigger for fallback matching
       const timeout = setTimeout(async () => {
          stopListening();
          
-         if (currentStepIndex === 4) {
-            commitOnboardingAnswer(currentStep.step, rawSpeech, rawSpeech);
-            return;
-         }
-
          setUIState('processing_match');
          setFeedbackMsg("A compreender resposta...");
 
-         // LAYER C (OpenAI)
+         // LAYER C (OpenAI) - Also applies broad screening for Step 5
          try {
             const apiReq = await fetch('/api/match', {
                method: 'POST',
@@ -192,23 +187,33 @@ export function OnboardingWizard({ onComplete, mode, isProcessing }: OnboardingW
             
             if (data.matchedOptionId && data.matchedOptionId !== 'NO_MATCH' && currentStep.chips.includes(data.matchedOptionId) && data.confidence !== 'low') {
                 console.log(`[Validation Pipeline] Layer C AI Match: ${data.matchedOptionId}`);
-                commitOnboardingAnswer(currentStep.step, rawSpeech, data.matchedOptionId);
+                if (currentStepIndex === 4) {
+                   commitOnboardingAnswer(currentStep.step, rawSpeech, rawSpeech); // preserve free context for Step 5
+                } else {
+                   commitOnboardingAnswer(currentStep.step, rawSpeech, data.matchedOptionId);
+                }
                 return;
             }
          } catch (e) {
             console.error('[Validation Pipeline] Layer C block fail', e);
          }
 
-         // FAILURE - NO MATCH
-         console.log(`[Validation Pipeline] Failed all layers for: ${rawSpeech}. Waiting for precise retry.`);
+         // FAILURE - NO MATCH RECENTERING
+         console.log(`[Validation Pipeline] Failed all layers for: ${rawSpeech}. Triggering RECENTER.`);
          setUIState('match_fail');
-         setFeedbackMsg("Ainda estou nesta pergunta. Podes dizer qual das opções ou tocar diretamente.");
+         
+         const recenterMsg = currentStepIndex === 4 
+            ? "Dá-me um exemplo um pouco mais concreto dentro destas áreas visíveis." 
+            : "Lamento, mas para esta avaliação funcionar tens de escolher uma das opções que tens no ecrã.";
+            
+         setFeedbackMsg(recenterMsg);
          manualSetTranscript(""); 
          
-         speak("Não relacionei essa resposta com as opções. Podes escolher uma das que vês no ecrã?", 
+         speak(recenterMsg, 
            () => setUIState('speaking'),
            () => { setFeedbackMsg(""); setUIState('listening'); startListening(); },
-           () => { setUIState('tts_failed'); }
+           () => { setUIState('tts_failed'); },
+           1.10
          );
 
       }, 1800); 
