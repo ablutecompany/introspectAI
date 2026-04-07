@@ -16,19 +16,11 @@ export async function askLLM(request: AskLLMRequest & { _requestId?: string }): 
   console.log(`[LLM Client] ID: ${reqId} | Prompts built via Conductor.`);
   
   // 3. Ask provider
-  let rawText = '';
-  let activeProviderMode: 'live' | 'mock' = 'mock';
-  try {
-     console.log(`[LLM Client] ID: ${reqId} | Sending structured prompt to ProviderLayer...`);
-     const res = await ProviderAdapter.requestOpenAI(system, user, reqId);
-     rawText = res.content;
-     activeProviderMode = res.providerMode;
-     console.log(`[LLM Client] ID: ${reqId} | Provider Adapter returned successfully. Content Length: ${rawText.length}`);
-  } catch (e: any) {
-     console.error(`[LLM Client] ID: ${reqId} | ProviderAdapter Throw! Error:`, e);
-     rawText = `{"error": "API Unreachable", "details": "${e.message}"}`; // Generates a Zod fail purposely if no catch configured
-     activeProviderMode = 'live'; // Fails contextually inside live attempt
-  }
+  console.log(`[LLM Client] ID: ${reqId} | Sending structured prompt to ProviderLayer...`);
+  const res = await ProviderAdapter.requestOpenAI(system, user, reqId);
+  const rawText = res.content;
+  const activeProviderMode = res.providerMode;
+  console.log(`[LLM Client] ID: ${reqId} | Provider Adapter returned successfully. Content Length: ${rawText.length}`);
 
   const latency = Date.now() - startTime;
 
