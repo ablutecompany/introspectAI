@@ -9,77 +9,118 @@ interface SessionStore extends InternalState {
   resetSession: () => void;
 }
 
-const CURRENT_SCHEMA_VERSION = 2;
-const CURRENT_APP_VERSION = 'v2.0.HalfDuplex';
+const CURRENT_SCHEMA_VERSION = 3;
+const CURRENT_APP_VERSION = 'v3.0.Engine';
 const EXPIRY_DAYS = 7;
-
-const initialState: Omit<InternalState, 'sessionId' | 'startedAt' | 'updatedAt' | 'schemaVersion' | 'appVersion'> = {
-  mode: 'conversation',
-  phase: 'opening',
-  turnIndex: 0,
-  
-  dominantHypothesis: null,
-  secondaryHypothesis: null,
-  rivalHypotheses: [],
-  
-  axisSignals: [],
-  contextSignals: [],
-  mechanismSignals: [],
-  costSignals: [],
-  fearSignals: [],
-  desiredLifeSignals: [],
-  protectiveSignals: [],
-  
-  unresolvedQuestions: [],
-  testedContrasts: [],
-  pendingClarifications: [],
-  
-  needsSimplification: false,
-  needsRecentering: false,
-  needsExample: false,
-  needsContrasting: false,
-  fatigueLevel: 'low',
-  trustLevel: 'low',
-  consecutiveVagueAnswers: 0,
-  consecutiveDeflectiveAnswers: 0,
-  
-  actionableLevers: [],
-  blockedLevers: [],
-  
-  confidenceLevel: 'insufficient',
-  outcomeReadinessScore: 0,
-  outcomeLevelCandidate: null,
-  
-  askedQuestionIds: [],
-  usedReframes: [],
-  collectedExamples: [],
-  keyUserPhrases: [],
-  transcriptHistory: []
-};
 
 const generateSessionId = () => Math.random().toString(36).substring(2, 10);
 const now = () => Date.now();
 
+const buildInitialState = (): Omit<InternalState, 'schemaVersion' | 'appVersion'> => {
+  const time = now();
+  return {
+    mode: 'conversation',
+    phase: 'SESSION_INIT',
+    
+    sessionMeta: {
+      sessionId: generateSessionId(),
+      isFirstSession: true,
+      isRegisteredUser: false,
+      startedAt: time,
+      updatedAt: time,
+      turnCount: 0,
+      questionCount: 0,
+      answerCount: 0
+    },
+
+    governance: {
+      userToleranceLevel: 'medium',
+      conversationLoad: 'low',
+      clarificationNeed: 'medium',
+      permissionToExtend: 'not_asked',
+      sessionNovelty: 'first',
+      fatigueSignals: [],
+      metaConversationDetected: false,
+      valueDeliveredYet: false,
+      extensionCount: 0
+    },
+
+    caseStructure: {
+      caseField: null,
+      surfaceTheme: null,
+      surfaceNature: null,
+      primaryFunction: null,
+      mainCost: null,
+      contrastResolution: null,
+      openAmbiguities: []
+    },
+
+    latentModel: {
+      deeperTheme: null,
+      latentHypothesis: null,
+      centralTension: null,
+      maintenanceLoop: null,
+      hiddenCost: null,
+      confidenceLevel: 'insufficient'
+    },
+
+    guidanceModel: {
+      repositioningFrame: null,
+      keyDistinction: null,
+      prematureActionToAvoid: null,
+      microStep: null,
+      nextQuestionIfNeeded: null
+    },
+
+    continuityMemory: {
+      priorCaseTheme: null,
+      priorLatentHypothesis: null,
+      priorPrimaryFunction: null,
+      priorCentralTension: null,
+      priorMainCost: null,
+      priorOpenAmbiguities: [],
+      priorMicroStep: null,
+      userResponseToLastStep: null,
+      toleranceStyle: null,
+      preferredDepth: null,
+      preferredMode: null
+    },
+
+    askedQuestionIds: [],
+    transcriptHistory: []
+  };
+};
+
 export const useSessionStore = create<SessionStore>()(
   persist(
     (set) => ({
-      sessionId: generateSessionId(),
-      startedAt: now(),
-      updatedAt: now(),
       schemaVersion: CURRENT_SCHEMA_VERSION,
       appVersion: CURRENT_APP_VERSION,
-      ...initialState,
+      ...buildInitialState(),
       
-      setMode: (mode) => set({ mode, updatedAt: now() }),
-      updateState: (partial) => set((state) => ({ ...state, ...partial, updatedAt: now() })),
-      incrementTurn: () => set((state) => ({ turnIndex: state.turnIndex + 1, updatedAt: now() })),
+      setMode: (mode) => set((state) => ({ 
+         mode, 
+         sessionMeta: { ...state.sessionMeta, updatedAt: now() } 
+      })),
+      
+      updateState: (partial) => set((state) => ({ 
+         ...state, 
+         ...partial, 
+         sessionMeta: { ...state.sessionMeta, ...(partial.sessionMeta || {}), updatedAt: now() } 
+      })),
+      
+      incrementTurn: () => set((state) => ({ 
+         sessionMeta: { 
+            ...state.sessionMeta, 
+            turnCount: state.sessionMeta.turnCount + 1, 
+            updatedAt: now() 
+         } 
+      })),
+      
       resetSession: () => set({ 
-         sessionId: generateSessionId(), 
-         startedAt: now(), 
-         updatedAt: now(), 
          schemaVersion: CURRENT_SCHEMA_VERSION, 
          appVersion: CURRENT_APP_VERSION, 
-         ...initialState 
+         ...buildInitialState() 
       }),
     }),
     {
@@ -87,14 +128,14 @@ export const useSessionStore = create<SessionStore>()(
       storage: createJSONStorage(() => localStorage),
       onRehydrateStorage: () => (state) => {
          if (!state) return;
-         const expired = now() - state.updatedAt > EXPIRY_DAYS * 24 * 60 * 60 * 1000;
+         const expired = state.sessionMeta ? (now() - state.sessionMeta.updatedAt > EXPIRY_DAYS * 24 * 60 * 60 * 1000) : true;
          const badVersion = state.schemaVersion !== CURRENT_SCHEMA_VERSION;
          
          if (expired || badVersion) {
             state.resetSession();
-            console.log(expired ? '[Persist] Session expired (7+ dias)' : '[Persist] Schema Version mismatch. Forçado reset.');
+            console.log(expired ? '[Persist] Session expired (7+ dias)' : '[Persist] Schema Version mismatch. Forçado reset para nova Estrutura Core.');
          } else {
-            console.log(`[Persist] Sessão retomada: ${state.sessionId}`);
+            console.log(`[Persist] Sessão retomada: ${state.sessionMeta.sessionId}`);
          }
       }
     }

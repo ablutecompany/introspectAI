@@ -1,197 +1,256 @@
-import { useState, useEffect } from 'react';
+import { useState, useEffect, useCallback } from 'react';
 import { useSessionStore } from '../store/useSessionStore';
 import { ConductorEngine } from '../engine/conductor';
 import { StateUpdater } from '../engine/updateState';
 import { InputClassifier } from '../engine/classifyInput';
 import type { UserIntent } from '../engine/classifyInput';
-import { OutcomeEngine } from '../engine/outcomeRules';
 import { useSpeechInput } from '../hooks/useSpeechInput';
 import { useTTS } from '../hooks/useTTS';
-import { ResumeCard } from '../features/session/ResumeCard';
 import { PostSessionFeedback } from '../features/feedback/PostSessionFeedback';
-import { OnboardingWizard } from '../features/session/OnboardingWizard';
 import { DebugPanel } from '../dev/DebugPanel';
 import './index.css';
 
+// ─── Chip Maps por fase ───────────────────────────────────────────────────────
+const CHIPS_BY_PHASE: Record<string, string[]> = {
+  FIELD: [
+    'desejo / relação',
+    'conflito interno',
+    'decisão difícil',
+    'padrão que se repete',
+    'trabalho / poder',
+    'identidade / rumo',
+    'perda / afastamento',
+    'corpo / impulso / hábito',
+    'outro'
+  ],
+  NATURE: [
+    'uma pessoa concreta',
+    'uma fantasia / ideia',
+    'algo proibido',
+    'uma necessidade minha',
+    'um medo',
+    'uma decisão adiada',
+    'um padrão antigo',
+    'outra coisa'
+  ],
+  FUNCTION: [
+    'alívio',
+    'excitação',
+    'confirmação',
+    'vitalidade',
+    'refúgio',
+    'controlo',
+    'esperança',
+    'distração',
+    'outra coisa'
+  ],
+  COST: [
+    'paz',
+    'clareza',
+    'energia',
+    'liberdade',
+    'desejo por outras coisas',
+    'relação comigo',
+    'relação com alguém',
+    'tempo',
+    'outra coisa'
+  ]
+};
+
+const CHIP_PHASES = new Set(['FIELD', 'NATURE', 'FUNCTION', 'COST']);
+
+// ─── Componente Principal ─────────────────────────────────────────────────────
 export default function App() {
-  const { mode, setMode, phase, turnIndex, updateState, incrementTurn, resetSession } = useSessionStore();
+  const {
+    mode, phase, sessionMeta, governance, caseStructure, latentModel, guidanceModel,
+    setMode, updateState, incrementTurn, resetSession
+  } = useSessionStore();
+
   const { isListening, transcript, toggleListening, startListening, stopListening, manualSetTranscript, error: sttError, isSupported } = useSpeechInput();
   const { speak, stop: stopTTS, isSpeaking } = useTTS();
-  
-  const [currentQuestion, setCurrentQuestion] = useState("Vou precisar que fales comigo.");
-  const [lastMoveType, setLastMoveType] = useState<string | null>(null);
-  const [inputText, setInputText] = useState("");
-  const [isProcessing, setIsProcessing] = useState(false);
-  const [connectionError, setConnectionError] = useState<{ failedText: string, failedIntent: UserIntent | 'auto', errorMessage?: string } | null>(null);
-  
-  // Only start in a resuming state if we ACTUALLY mount with an existing active session > 0
-  const [isResuming, setIsResuming] = useState(() => useSessionStore.getState().turnIndex > 0);
-  const [showTranscriptInput, setShowTranscriptInput] = useState(false);
 
+  const [currentQuestion, setCurrentQuestion] = useState('');
+  const [lastMoveType, setLastMoveType] = useState<string | null>(null);
+  const [inputText, setInputText] = useState('');
+  const [isProcessing, setIsProcessing] = useState(false);
+  const [connectionError, setConnectionError] = useState<{ failedText: string; failedIntent: UserIntent | 'auto'; errorMessage?: string } | null>(null);
+  const [showTranscriptInput, setShowTranscriptInput] = useState(false);
+  const [isResuming, setIsResuming] = useState(() => useSessionStore.getState().sessionMeta.turnCount > 0);
+
+  // TTS auto-play on new question in conversation mode
   useEffect(() => {
-     if (connectionError && isListening) {
-         const norm = transcript.toLowerCase().trim();
-         if (norm.includes('ok') || norm.includes('está bem') || norm.includes('esta bem')) {
-             stopListening();
-             recoverFromConnectionError();
-         }
-     }
+    if (mode === 'conversation' && currentQuestion) {
+      speak(currentQuestion, () => {
+        if (sessionMeta.turnCount > 0) startListening();
+      });
+    }
+  }, [currentQuestion, mode]);
+
+  // Reset resuming flag when session is brand new
+  useEffect(() => {
+    if (sessionMeta.turnCount === 0) setIsResuming(false);
+  }, [sessionMeta.turnCount]);
+
+  // Auto-submit on voice silence
+  useEffect(() => {
+    if (mode === 'conversation' && sessionMeta.turnCount > 0 && isListening && transcript.trim().length >= 4) {
+      const timeout = setTimeout(() => {
+        stopListening();
+        handleUserSubmit('auto');
+      }, 2200);
+      return () => clearTimeout(timeout);
+    }
+  }, [transcript, isListening, mode, sessionMeta.turnCount]);
+
+  // Connection error recovery via voice
+  useEffect(() => {
+    if (connectionError && isListening) {
+      const norm = transcript.toLowerCase().trim();
+      if (norm.includes('ok') || norm.includes('está bem') || norm.includes('esta bem')) {
+        stopListening();
+        recoverFromConnectionError();
+      }
+    }
   }, [transcript, isListening, connectionError]);
 
   const recoverFromConnectionError = () => {
-      if (!connectionError) return;
-      console.log('[System Recovery] Resuming failed context transmission...');
-      const { failedText, failedIntent } = connectionError;
-      setConnectionError(null);
-      handleUserSubmit(failedIntent, failedText);
+    if (!connectionError) return;
+    const { failedText, failedIntent } = connectionError;
+    setConnectionError(null);
+    handleUserSubmit(failedIntent, failedText);
   };
 
-  // Guarantee that starting a brand new session mathematically clears the resumption block 
-  // preventing it from mistakenly triggering after onboarding steps
-  useEffect(() => {
-     if (turnIndex === 0) {
-        setIsResuming(false);
-     }
-  }, [turnIndex]);
-
-  // Trigger TTS on new question if conversation mode
-  useEffect(() => {
-     if (mode === 'conversation' && currentQuestion) {
-        speak(currentQuestion, () => {
-           // Auto-start listening ONLY if we are past the onboarding wizard
-           if (turnIndex > 0) {
-              startListening();
-           }
-        });
-     }
-  }, [currentQuestion, mode, speak, turnIndex, startListening]);
-
-  // Handle Silence Auto-Submit ONLY for main conversation flow, not onboarding
-  useEffect(() => {
-     if (mode === 'conversation' && turnIndex > 0 && isListening && transcript.trim().length >= 4) {
-        const timeout = setTimeout(() => {
-           // Silence reached during listening, auto submit phrase!
-           stopListening();
-           handleUserSubmit('auto');
-        }, 2200);
-        return () => clearTimeout(timeout);
-     }
-  }, [transcript, isListening, mode, turnIndex]);
-
-  const startSession = (selectedMode: 'conversation' | 'writing') => {
-    setMode(selectedMode);
-    updateState({ phase: 'micro_triage' });
-  };
-
-  const handleUserSubmit = async (rawIntent: UserIntent | 'auto' = 'auto', overrideText?: string) => {
+  // ─── Core Submit ─────────────────────────────────────────────────────────────
+  const handleUserSubmit = useCallback(async (rawIntent: UserIntent | 'auto' = 'auto', overrideText?: string) => {
     stopListening();
-    stopTTS(); // Protects manual route against active voice overlap during turn changes
+    stopTTS();
     const isVoiceTurn = mode === 'conversation' && rawIntent === 'auto';
     const finalUserText = overrideText || (isVoiceTurn ? transcript : inputText);
-
     if (!finalUserText.trim() && rawIntent === 'auto') return;
-    
+
     setIsProcessing(true);
     const state = useSessionStore.getState();
-
-    // 1. Classify
     const textToClassify = rawIntent === 'auto' ? finalUserText : String(rawIntent);
-    const intent = rawIntent !== 'auto' ? rawIntent : InputClassifier.classify(textToClassify);
-    
-    // 2. Conductor decides next move
-    const nextMove = ConductorEngine.decideNextMove(state, intent as any);
-    
+    const intent: UserIntent = rawIntent !== 'auto' ? (rawIntent as UserIntent) : InputClassifier.classify(textToClassify);
+    const nextMove = ConductorEngine.decideNextMove(state, intent);
+
     const requestId = crypto.randomUUID();
-    console.log(`[Frontend Submit] Request ID: ${requestId} | Phase: ${state.phase} | Turn: ${state.turnIndex}`);
-    
-    // 3. Ask LLM live Endpoint via local server boundary
+
     let response;
     try {
-      const payloadShape = {
-         internalState: state,
-         userResponse: finalUserText,
-         userIntent: intent,
-         forcedNextMove: nextMove,
-         inputType: mode === 'conversation' ? (transcript !== finalUserText ? 'corrected_transcript' : 'transcribed') : 'typed'
+      const payload = {
+        internalState: state,
+        userResponse: finalUserText,
+        userIntent: intent,
+        forcedNextMove: nextMove,
+        inputType: mode === 'conversation' ? (transcript !== finalUserText ? 'corrected_transcript' : 'transcribed') : 'typed'
       };
-      console.log(`[Frontend Submit] ID: ${requestId} | Payload Build OK. Sending to Backend...`, { hasState: !!payloadShape.internalState, textLen: payloadShape.userResponse.length, move: payloadShape.forcedNextMove });
-      
+
       const apiReq = await fetch('/api/llm', {
-         method: 'POST',
-         headers: { 
-             'Content-Type': 'application/json',
-             'X-Request-ID': requestId 
-         },
-         body: JSON.stringify(payloadShape)
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json', 'X-Request-ID': requestId },
+        body: JSON.stringify(payload)
       });
-      
+
       if (!apiReq.ok) {
-         let errorStr = apiReq.statusText;
-         try {
-            const errBody = await apiReq.json();
-            if (errBody && errBody.error) errorStr = errBody.error;
-         } catch(ignored) {}
-         console.error(`[Frontend Submit] ID: ${requestId} | Native API Error Status: ${apiReq.status} | Detailed: ${errorStr}`);
-         throw new Error(errorStr);
+        let errorStr = apiReq.statusText;
+        try { const b = await apiReq.json(); if (b?.error) errorStr = b.error; } catch (_) {}
+        throw new Error(errorStr);
       }
-      
       response = await apiReq.json();
-      console.log(`[Frontend Submit] ID: ${requestId} | Response OK.`);
     } catch (e: any) {
-      console.error(`[Frontend Submit] API Loop Failure | ID: ${requestId} | Error:`, e);
-      stopListening();
-      stopTTS();
-      // Store the specific error so UI can adapt
-      setConnectionError({ failedText: finalUserText, failedIntent: intent as any, errorMessage: e?.message });
+      setConnectionError({ failedText: finalUserText, failedIntent: intent, errorMessage: e?.message });
       setIsProcessing(false);
-      return; 
+      return;
     }
-    
-    // 4. Update the real state and commit transcript block
-    const updatedHistory = [...state.transcriptHistory, 
-       { role: 'human', text: finalUserText },
-       { role: 'ai', text: response.userFacingText }
+
+    // Merge state via StateUpdater
+    const stateUpdates = StateUpdater.enrich(state, intent, response);
+    const updatedHistory = [
+      ...state.transcriptHistory,
+      { role: 'human' as const, text: finalUserText },
+      { role: 'ai' as const, text: response.userFacingText }
     ];
-    
-    // @ts-ignore
-    const stateUpdates = StateUpdater.enrich(state, intent as any, response);
-    updateState({ ...stateUpdates, transcriptHistory: updatedHistory as any });
-    
-    // 5. Update UI
+
+    updateState({ ...stateUpdates, transcriptHistory: updatedHistory });
     setCurrentQuestion(response.userFacingText);
     setLastMoveType(response.nextMoveType || nextMove);
-    setInputText("");
-    manualSetTranscript(""); // Reseta a transcrição após o envio
+    setInputText('');
+    manualSetTranscript('');
     setShowTranscriptInput(false);
     incrementTurn();
     setIsProcessing(false);
+  }, [mode, transcript, inputText, stopListening, stopTTS, updateState, incrementTurn, manualSetTranscript]);
+
+  // ─── Chip click handler ───────────────────────────────────────────────────────
+  const handleChipClick = (chipText: string) => {
+    stopListening();
+    manualSetTranscript(chipText);
+    handleUserSubmit('substantive', chipText);
   };
 
-  const handleInterruptSpeaking = () => {
-     stopTTS();
+  // ─── Session Start ────────────────────────────────────────────────────────────
+  const startSession = (selectedMode: 'conversation' | 'writing') => {
+    setMode(selectedMode);
+    // Trigger the first question: ask_field
+    handleUserSubmitFirstTurn(selectedMode);
+  };
+
+  const handleUserSubmitFirstTurn = async (selectedMode: 'conversation' | 'writing') => {
+    setIsProcessing(true);
+    const state = useSessionStore.getState();
+    const requestId = crypto.randomUUID();
+    const nextMove = 'ask_field';
+
+    try {
+      const payload = {
+        internalState: { ...state, mode: selectedMode, phase: 'FIELD' },
+        userResponse: '',
+        userIntent: 'substantive',
+        forcedNextMove: nextMove,
+        inputType: selectedMode === 'conversation' ? 'transcribed' : 'typed'
+      };
+      const apiReq = await fetch('/api/llm', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json', 'X-Request-ID': requestId },
+        body: JSON.stringify(payload)
+      });
+      if (!apiReq.ok) throw new Error(apiReq.statusText);
+      const response = await apiReq.json();
+      updateState({ phase: 'FIELD', mode: selectedMode });
+      setCurrentQuestion(response.userFacingText);
+      setLastMoveType(response.nextMoveType || nextMove);
+    } catch (e: any) {
+      // Fallback: use static template from spec
+      updateState({ phase: 'FIELD', mode: selectedMode });
+      setCurrentQuestion('Isto pesa-te mais em que zona?');
+      setLastMoveType('ask_field');
+    }
+    setIsProcessing(false);
   };
 
   const state = useSessionStore.getState();
-  
-  if (phase === 'opening') {
+
+  // ─── Render: SESSION_INIT (Splash) ────────────────────────────────────────────
+  if (phase === 'SESSION_INIT') {
     return (
       <div className="container">
         <div className="splash">
           <h1>_introspect_AI</h1>
           <p>
-            Um espaço focado para perceber o que pesa. <br/>
+            Localiza o que pesa. Percebe o que o mantém. Recebe orientação concreta.<br />
             Como preferes avançar hoje?
           </p>
           <div className="splash-actions">
-            <button onClick={() => startSession('conversation')} className="splash-btn btn-outline">
-              Falar (Voz)
+            <button onClick={() => startSession('conversation')} className="splash-btn btn-outline" disabled={isProcessing}>
+              {isProcessing ? 'A preparar...' : 'Falar (Voz)'}
             </button>
-            <button onClick={() => startSession('writing')} className="splash-btn btn-ghost">
-              Prefiro Escrever
+            <button onClick={() => startSession('writing')} className="splash-btn btn-ghost" disabled={isProcessing}>
+              {isProcessing ? 'A preparar...' : 'Prefiro Escrever'}
             </button>
           </div>
           <div style={{ marginTop: '32px', fontSize: '0.75rem', color: '#cbd5e1' }}>
-             {useSessionStore.getState().appVersion}
+            {useSessionStore.getState().appVersion}
           </div>
         </div>
         {!import.meta.env.PROD && <DebugPanel />}
@@ -199,275 +258,267 @@ export default function App() {
     );
   }
 
-  if (phase === 'outcome_delivered') {
-    const outcome = OutcomeEngine.calculateOutcome(state);
+  // ─── Render: RESUME_CHECK ─────────────────────────────────────────────────────
+  if (phase === 'RESUME_CHECK' && isResuming && sessionMeta.turnCount > 0) {
+    const prior = state.continuityMemory;
+    return (
+      <div className="app-container" style={{ display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
+        <div style={{ maxWidth: 480, width: '100%', padding: '0 24px' }}>
+          <h2 style={{ marginBottom: 16 }}>Sessão anterior</h2>
+          {prior.priorLatentHypothesis && (
+            <div style={{ background: 'var(--accent-base)', border: '1px solid var(--border-color)', borderRadius: 12, padding: 20, marginBottom: 24, fontSize: '0.95rem', lineHeight: 1.6, color: 'var(--text-muted)' }}>
+              {prior.priorLatentHypothesis}
+            </div>
+          )}
+          <p style={{ color: 'var(--text-muted)', marginBottom: 24, fontSize: '0.9rem' }}>
+            Da última vez ficou uma hipótese aberta. Queres continuar daí, corrigir a base, ou começar de outro ângulo?
+          </p>
+          <div style={{ display: 'flex', flexDirection: 'column', gap: 12 }}>
+            <button className="btn-primary" onClick={() => { updateState({ phase: 'CONTINUATION_MODE_SELECT' }); setIsResuming(false); }}>
+              Continuar daí
+            </button>
+            <button className="btn-secondary" onClick={() => { updateState({ phase: 'FIELD' }); setIsResuming(false); handleUserSubmitFirstTurn(mode); }}>
+              Começar de outro ângulo
+            </button>
+            <button className="btn-secondary" onClick={() => { resetSession(); setIsResuming(false); }}>
+              Limpar e começar do zero
+            </button>
+          </div>
+        </div>
+        {!import.meta.env.PROD && <DebugPanel />}
+      </div>
+    );
+  }
+
+  // ─── Render: CLOSE ────────────────────────────────────────────────────────────
+  if (phase === 'CLOSE') {
     return (
       <div className="container" style={{ padding: '0 2rem' }}>
         <div className="splash" style={{ maxWidth: 600 }}>
-          <h1 style={{ marginBottom: '2rem' }}>A Tua Leitura (Nível {outcome.level})</h1>
-          <div style={{ textAlign: 'left', background: 'var(--accent-base)', border: '1px solid var(--border-color)', borderRadius: 12, padding: 24, fontSize: '0.95rem', lineHeight: 1.6, color: 'var(--text-muted)' }}>
-             {Object.entries(outcome.payload).map(([k, v]) => (
-                <div key={k} style={{ marginBottom: 12 }}>
-                   <strong style={{color: 'var(--text-main)', textTransform: 'capitalize'}}>{k.replace(/([A-Z])/g, ' $1')}:</strong><br/>
-                   {v}
+          <h1 style={{ marginBottom: '0.5rem', fontSize: '1.4rem' }}>Leitura</h1>
+          {latentModel.latentHypothesis && (
+            <div style={{ textAlign: 'left', background: 'var(--accent-base)', border: '1px solid var(--border-color)', borderRadius: 12, padding: 24, fontSize: '0.95rem', lineHeight: 1.7, color: 'var(--text-muted)', marginBottom: 24 }}>
+              {latentModel.latentHypothesis}
+            </div>
+          )}
+          {(guidanceModel.repositioningFrame || guidanceModel.microStep) && (
+            <div style={{ textAlign: 'left', borderRadius: 12, padding: '0 4px', marginBottom: 24 }}>
+              {guidanceModel.repositioningFrame && (
+                <div style={{ marginBottom: 16 }}>
+                  <strong style={{ color: 'var(--text-main)', display: 'block', marginBottom: 6, fontSize: '0.8rem', textTransform: 'uppercase', letterSpacing: '0.05em' }}>Reposicionamento</strong>
+                  <p style={{ margin: 0, color: 'var(--text-muted)', lineHeight: 1.6 }}>{guidanceModel.repositioningFrame}</p>
                 </div>
-             ))}
-          </div>
-          <button onClick={() => useSessionStore.getState().resetSession()} className="btn-primary" style={{ marginTop: 32 }}>Nova Sessão</button>
+              )}
+              {guidanceModel.keyDistinction && (
+                <div style={{ marginBottom: 16 }}>
+                  <strong style={{ color: 'var(--text-main)', display: 'block', marginBottom: 6, fontSize: '0.8rem', textTransform: 'uppercase', letterSpacing: '0.05em' }}>Distinção</strong>
+                  <p style={{ margin: 0, color: 'var(--text-muted)', lineHeight: 1.6 }}>{guidanceModel.keyDistinction}</p>
+                </div>
+              )}
+              {guidanceModel.microStep && (
+                <div style={{ background: 'var(--accent-base)', border: '1px solid var(--border-color)', borderRadius: 8, padding: 16 }}>
+                  <strong style={{ color: 'var(--text-main)', display: 'block', marginBottom: 6, fontSize: '0.8rem', textTransform: 'uppercase', letterSpacing: '0.05em' }}>Micro-passo</strong>
+                  <p style={{ margin: 0, color: 'var(--text-muted)', lineHeight: 1.6 }}>{guidanceModel.microStep}</p>
+                </div>
+              )}
+            </div>
+          )}
+          <PostSessionFeedback onComplete={(feedback) => console.log('Feedback Final:', feedback)} />
+          <button onClick={resetSession} className="btn-secondary" style={{ marginTop: 20 }}>
+            Nova Sessão
+          </button>
         </div>
         {!import.meta.env.PROD && <DebugPanel />}
       </div>
     );
   }
 
-  const handleExportEcosystem = () => {
-    const ecosystemProfile = {
-       wearLevel: { intensity: 'high', confidence: 'moderate', temporality: 'persistent', origin: 'inferido por fadiga estrutural' }
-       // Simulated for MVP output
-    };
-    alert('Mock Request Emitido: A gerar integração segura via Profile Ecosystem.');
-    console.log('[Ablute Ecosystem Handoff] Payload Export:', ecosystemProfile);
-  };
-
-  // ERROR STATE OVERRIDE (Must be highest priority to prevent silent crashes in Turn 0)
+  // ─── Render: Connection Error ─────────────────────────────────────────────────
   if (connectionError) {
-      return (
-         <div className="app-container" style={{ padding: '0 2rem', display: 'flex', alignItems: 'center', justifyContent: 'center', height: '100vh' }}>
-            <div style={{ textAlign: 'center', display: 'flex', flexDirection: 'column', alignItems: 'center', maxWidth: '400px', width: '100%' }}>
-               <div style={{ padding: '24px', background: '#fee2e2', borderRadius: '12px', color: '#b91c1c', width: '100%', marginBottom: '32px', border: '1px solid #fca5a5', boxShadow: '0 8px 16px rgba(185, 28, 28, 0.1)' }}>
-                  <strong style={{ fontSize: '1.2rem', display: 'block', marginBottom: '12px' }}>Falha na Ligação</strong>
-                  <span style={{ fontSize: '0.95rem', lineHeight: '1.5' }}>
-                     {connectionError.errorMessage?.includes('OPENAI_API_KEY') 
-                       ? "A produção ainda não está ligada ao motor real. (OPENAI_API_KEY em falta)" 
-                       : "Não foi possível contactar o motor. Não te preocupes, o teu progresso exato está preservado localmente."}
-                  </span>
-               </div>
-               <button onClick={() => recoverFromConnectionError()} className="btn-primary" style={{ marginBottom: '32px', background: '#ef4444', padding: '16px 32px', fontSize: '1.1rem', width: '100%' }}>
-                  Tentar de novo
-               </button>
-               {mode === 'conversation' && (
-                  <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center' }}>
-                     <div style={{ color: '#64748b', fontSize: '0.9rem', marginBottom: '16px' }}>Também podes tocar abaixo e dizer "ok"</div>
-                     <button 
-                       onClick={toggleListening} 
-                       disabled={!isSupported || isProcessing}
-                       style={{
-                          width: '80px', height: '80px', borderRadius: '50%', 
-                          background: isListening ? '#ef4444' : '#0f172a',
-                          color: '#fff', border: 'none', cursor: 'pointer',
-                          fontSize: '1.8rem', boxShadow: isListening ? '0 0 24px rgba(239,68,68,0.5)' : 'none',
-                          transition: '0.2s all'
-                       }}
-                     >
-                        🎙️
-                     </button>
-                     {isListening && <div style={{ color: '#ef4444', fontSize: '0.9rem', marginTop: '12px', fontWeight: 'bold' }}>Estou a ouvir...</div>}
-                  </div>
-               )}
-            </div>
-         </div>
-      );
+    return (
+      <div className="app-container" style={{ padding: '0 2rem', display: 'flex', alignItems: 'center', justifyContent: 'center', height: '100vh' }}>
+        <div style={{ textAlign: 'center', display: 'flex', flexDirection: 'column', alignItems: 'center', maxWidth: '400px', width: '100%' }}>
+          <div style={{ padding: '24px', background: '#fee2e2', borderRadius: '12px', color: '#b91c1c', width: '100%', marginBottom: '32px', border: '1px solid #fca5a5' }}>
+            <strong style={{ fontSize: '1.1rem', display: 'block', marginBottom: '10px' }}>Falha na Ligação</strong>
+            <span style={{ fontSize: '0.9rem', lineHeight: '1.5' }}>
+              {connectionError.errorMessage?.includes('OPENAI_API_KEY')
+                ? 'Motor não configurado (API Key em falta).'
+                : 'Não foi possível contactar o motor. O teu progresso está preservado.'}
+            </span>
+          </div>
+          <button onClick={recoverFromConnectionError} className="btn-primary" style={{ marginBottom: '16px', width: '100%' }}>
+            Tentar de novo
+          </button>
+          <button onClick={resetSession} className="btn-secondary" style={{ width: '100%' }}>
+            Recomeçar
+          </button>
+        </div>
+      </div>
+    );
   }
 
-  // INTERCEPT START
-  if (isResuming && turnIndex > 0 && (phase as string) !== 'outcome_delivered') {
-      return (
-         <div className="app-container" style={{ display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
-            <ResumeCard 
-              onResume={() => setIsResuming(false)} 
-              onReset={() => {
-                resetSession();
-                setIsResuming(false);
-              }}
-            />
-            {!import.meta.env.PROD && (
-               <>
-                  <h4>Resultado Preliminar (Dev Mode):</h4>
-                  <pre style={{ fontSize: '0.8em', whiteSpace: 'pre-wrap' }}>
-                    {JSON.stringify(OutcomeEngine.calculateOutcome(state).payload, null, 2)}
-                  </pre>
-               </>
-            )}
-         </div>
-      );
-  }
+  // ─── Determinar se estamos numa fase de chips ─────────────────────────────────
+  const activeChips = CHIP_PHASES.has(phase) ? (CHIPS_BY_PHASE[phase] ?? []) : [];
+  const isChipPhase = activeChips.length > 0;
 
-  if (turnIndex === 0 && phase === 'micro_triage') {
-      return (
-         <div className="app-container">
-            <OnboardingWizard 
-               mode={mode} 
-               isProcessing={isProcessing}
-               onComplete={(stitchedTranscript) => {
-                  handleUserSubmit('auto', stitchedTranscript);
-               }} 
-            />
-            {!import.meta.env.PROD && <DebugPanel />}
-         </div>
-      );
-  }
-
+  // ─── Render Principal: Conversa ───────────────────────────────────────────────
   return (
     <div className="app-container" style={{ padding: '0 2rem' }}>
       <div className="session-wrapper">
         <div className="topbar">
           <span>_introspect</span>
-          <span>Turno {turnIndex} • {mode === 'writing' ? 'Escrever' : 'Voz'}</span>
+          <span>Turno {sessionMeta.turnCount} • {mode === 'writing' ? 'Escrever' : 'Voz'} • {phase}</span>
         </div>
 
         <div className="content-area">
           <h2 className="question-text">
-            {currentQuestion}
+            {currentQuestion || (isProcessing ? 'A preparar...' : '')}
           </h2>
 
-          <div className="input-area">
-            {mode === 'writing' ? (
-              <textarea
-                autoFocus
-                value={inputText}
-                onChange={(e) => setInputText(e.target.value)}
-                onKeyDown={(e) => {
-                  if (e.key === 'Enter' && !e.shiftKey) {
-                    e.preventDefault();
-                    handleUserSubmit('auto');
-                  }
-                }}
-                placeholder="A tua resposta..."
-                disabled={isProcessing}
-              />
-            ) : (
-              <div className="audio-live-container" style={{ display: 'flex', flexDirection: 'column', gap: 24, alignItems: 'center' }}>
-                {!isSupported && <div style={{ color: '#ef4444', fontSize: '0.8rem', textAlign: 'center' }}>Aviso: Microfone indisponível. Recorrendo apenas aos botões e reencaminhando fluxo.</div>}
-                
-                {isSpeaking && (
-                   <button onClick={handleInterruptSpeaking} style={{ background: '#f8fafc', border: '1px solid #cbd5e1', color: '#64748b', padding: '6px 12px', borderRadius: '16px', fontSize: '0.8rem', cursor: 'pointer' }}>
-                      Pausar leitura de IA ◼
-                   </button>
-                )}
-                <div style={{ padding: '32px 0' }}>
-                   <button 
-                     onClick={toggleListening} 
-                     disabled={!isSupported || isProcessing || isSpeaking}
-                     style={{
-                        width: '100px',
-                        height: '100px',
-                        borderRadius: '50%', 
-                        border: isListening ? '6px solid #fecaca' : 'none', 
+          {/* ── CHIPS (fases FIELD / NATURE / FUNCTION / COST) ── */}
+          {isChipPhase && (
+            <div style={{ marginTop: 32 }}>
+              <div style={{ display: 'flex', flexWrap: 'wrap', gap: '10px', justifyContent: mode === 'conversation' ? 'center' : 'flex-start' }}>
+                {activeChips.map(chip => (
+                  <button
+                    key={chip}
+                    onClick={() => handleChipClick(chip)}
+                    disabled={isProcessing}
+                    style={{
+                      padding: '10px 18px',
+                      background: 'var(--accent-base, #1e293b)',
+                      color: 'var(--text-main, #f1f5f9)',
+                      border: '1px solid var(--border-color, #334155)',
+                      borderRadius: '24px',
+                      cursor: isProcessing ? 'not-allowed' : 'pointer',
+                      fontSize: '0.88rem',
+                      lineHeight: 1.4,
+                      transition: 'all 0.15s ease',
+                      opacity: isProcessing ? 0.5 : 1
+                    }}
+                    onMouseEnter={e => { if (!isProcessing) (e.target as HTMLElement).style.borderColor = '#94a3b8'; }}
+                    onMouseLeave={e => { (e.target as HTMLElement).style.borderColor = 'var(--border-color, #334155)'; }}
+                  >
+                    {chip}
+                  </button>
+                ))}
+              </div>
+              {/* Permitir alternativa de texto livre mesmo nas fases de chips */}
+              {mode === 'writing' && (
+                <div style={{ marginTop: 20 }}>
+                  <textarea
+                    value={inputText}
+                    onChange={e => setInputText(e.target.value)}
+                    onKeyDown={e => { if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); handleUserSubmit('auto'); } }}
+                    placeholder="Ou descreve com as tuas palavras..."
+                    disabled={isProcessing}
+                    style={{ fontSize: '0.9rem', minHeight: 60 }}
+                  />
+                  {inputText.trim() && (
+                    <div className="controls" style={{ marginTop: 12 }}>
+                      <button onClick={() => handleUserSubmit('auto')} disabled={isProcessing} className="btn-primary">
+                        {isProcessing ? 'A processar...' : 'Continuar'}
+                      </button>
+                    </div>
+                  )}
+                </div>
+              )}
+            </div>
+          )}
+
+          {/* ── INPUT ZONE (fases sem chips) ── */}
+          {!isChipPhase && (
+            <div className="input-area">
+              {mode === 'writing' ? (
+                <textarea
+                  autoFocus
+                  value={inputText}
+                  onChange={e => setInputText(e.target.value)}
+                  onKeyDown={e => { if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); handleUserSubmit('auto'); } }}
+                  placeholder="A tua resposta..."
+                  disabled={isProcessing}
+                />
+              ) : (
+                <div className="audio-live-container" style={{ display: 'flex', flexDirection: 'column', gap: 24, alignItems: 'center' }}>
+                  {!isSupported && <div style={{ color: '#ef4444', fontSize: '0.8rem', textAlign: 'center' }}>Microfone indisponível.</div>}
+
+                  {isSpeaking && (
+                    <button onClick={stopTTS} style={{ background: '#f8fafc', border: '1px solid #cbd5e1', color: '#64748b', padding: '6px 12px', borderRadius: '16px', fontSize: '0.8rem', cursor: 'pointer' }}>
+                      Pausar ◼
+                    </button>
+                  )}
+
+                  <div style={{ padding: '32px 0' }}>
+                    <button
+                      onClick={toggleListening}
+                      disabled={!isSupported || isProcessing || isSpeaking}
+                      style={{
+                        width: 100, height: 100, borderRadius: '50%',
+                        border: isListening ? '6px solid #fecaca' : 'none',
                         background: isProcessing ? '#fbbf24' : isListening ? '#ef4444' : isSpeaking ? '#3b82f6' : '#0f172a',
-                        color: '#fff',
-                        cursor: (isSupported && !isSpeaking && !isProcessing) ? 'pointer' : 'not-allowed',
-                        boxShadow: isListening ? '0 0 24px rgba(239, 68, 68, 0.4)' : isProcessing ? '0 0 24px rgba(251, 191, 36, 0.4)' : isSpeaking ? '0 0 24px rgba(59, 130, 246, 0.4)' : '0 8px 16px rgba(15, 23, 42, 0.2)',
-                        transition: '0.2s all',
-                        display: 'flex',
-                        flexDirection: 'column',
-                        alignItems: 'center',
-                        justifyContent: 'center'
-                     }}
-                   >
-                     <span style={{ fontSize: '2rem' }}>
-                        {isProcessing ? '⏳' : isSpeaking ? '🔊' : '🎙️'}
-                     </span>
-                   </button>
-                   <div style={{ textAlign: 'center', marginTop: '16px', color: isProcessing ? '#d97706' : isListening ? '#ef4444' : isSpeaking ? '#2563eb' : '#64748b', fontWeight: (isListening || isSpeaking || isProcessing) ? 'bold' : 'normal' }}>
+                        color: '#fff', cursor: (!isSupported || isSpeaking || isProcessing) ? 'not-allowed' : 'pointer',
+                        boxShadow: isListening ? '0 0 24px rgba(239,68,68,0.4)' : isProcessing ? '0 0 24px rgba(251,191,36,0.4)' : 'none',
+                        transition: '0.2s all', display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center'
+                      }}
+                    >
+                      <span style={{ fontSize: '2rem' }}>{isProcessing ? '⏳' : isSpeaking ? '🔊' : '🎙️'}</span>
+                    </button>
+                    <div style={{ textAlign: 'center', marginTop: 16, color: isProcessing ? '#d97706' : isListening ? '#ef4444' : isSpeaking ? '#2563eb' : '#64748b', fontWeight: (isListening || isSpeaking || isProcessing) ? 'bold' : 'normal' }}>
                       {isProcessing ? 'A processar...' : isSpeaking ? 'A falar...' : isListening ? 'Estou a ouvir...' : 'Toca para Falar'}
-                   </div>
-                   {isListening && transcript.trim().length > 0 && (
-                      <div style={{ fontSize: '0.75rem', color: '#94a3b8', marginTop: 4, fontStyle: 'italic', textAlign: 'center' }}>
-                         (Irá enviar automaticamente se houver pausa)
-                      </div>
-                   )}
-                   {sttError && <div style={{color: '#ef4444', fontSize: 12, marginTop: 8, textAlign:'center'}}>{sttError}</div>}
-                 </div>
-                
-                {/* Visual support and manual edit toggle */}
-                {transcript && (
-                   <div style={{ width: '100%', background: '#f8fafc', padding: '16px', borderRadius: '8px', border: '1px solid #e2e8f0' }}>
+                    </div>
+                    {sttError && <div style={{ color: '#ef4444', fontSize: 12, marginTop: 8, textAlign: 'center' }}>{sttError}</div>}
+                  </div>
+
+                  {transcript && (
+                    <div style={{ width: '100%', background: '#f8fafc', padding: 16, borderRadius: 8, border: '1px solid #e2e8f0' }}>
                       <p style={{ margin: 0, fontSize: '0.9rem', color: '#334155', fontStyle: 'italic' }}>"{transcript}"</p>
                       {!showTranscriptInput && (
-                         <div style={{ textAlign: 'right', marginTop: '8px' }}>
-                            <button onClick={() => setShowTranscriptInput(true)} style={{ background: 'transparent', border: 'none', color: '#3b82f6', fontSize: '0.8rem', cursor: 'pointer', textDecoration: 'underline' }}>
-                               Corrigir texto transcrito
-                            </button>
-                         </div>
+                        <div style={{ textAlign: 'right', marginTop: 8 }}>
+                          <button onClick={() => setShowTranscriptInput(true)} style={{ background: 'transparent', border: 'none', color: '#3b82f6', fontSize: '0.8rem', cursor: 'pointer', textDecoration: 'underline' }}>
+                            Corrigir texto
+                          </button>
+                        </div>
                       )}
-                      
                       {showTranscriptInput && (
-                         <textarea
-                           value={transcript}
-                           onChange={(e) => manualSetTranscript(e.target.value)}
-                           disabled={isProcessing || isListening}
-                           style={{ minHeight: 60, marginTop: '12px', fontSize: '0.85rem' }}
-                         />
+                        <textarea value={transcript} onChange={e => manualSetTranscript(e.target.value)} disabled={isProcessing || isListening} style={{ minHeight: 60, marginTop: 12, fontSize: '0.85rem' }} />
                       )}
-                   </div>
-                )}
-                
-                {/* Voice-First Chips Sub-Layer */}
-                <div style={{ display: 'flex', gap: '8px', flexWrap: 'wrap', justifyContent: 'center', width: '100%', marginTop: '12px' }}>
-                    {/* Hide Sim/Não generically when engine actively asks an open-text inquiry */}
-                    {!(lastMoveType?.startsWith('ask_')) && ['Sim', 'Não', 'Mais ou menos'].map(txt => (
-                       <button key={txt} onClick={() => { stopListening(); manualSetTranscript(txt); handleUserSubmit('substantive'); }} disabled={isProcessing || isSpeaking} style={{ padding: '8px 16px', background: '#e2e8f0', color: '#334155', border: 'none', borderRadius: '24px', cursor: 'pointer', fontSize: '0.85rem' }}>
-                          {txt}
-                       </button>
-                    ))}
-                    <button onClick={() => { stopListening(); handleUserSubmit('simplify_request'); }} disabled={isProcessing || isSpeaking} style={{ padding: '8px 16px', background: '#ffe4e6', color: '#be123c', border: 'none', borderRadius: '24px', cursor: 'pointer', fontSize: '0.85rem' }}>
-                       Explica-me melhor
-                    </button>
-                    <button onClick={() => { stopListening(); handleUserSubmit('dont_know'); }} disabled={isProcessing || isSpeaking} style={{ padding: '8px 16px', background: '#f1f5f9', color: '#475569', border: 'none', borderRadius: '24px', cursor: 'pointer', fontSize: '0.85rem' }}>
-                       Não sei
-                    </button>
-                </div>
-              </div>
-            )}
+                    </div>
+                  )}
 
-            {mode === 'writing' && !connectionError && (
-              <div className="controls">
-                <div className="secondary-actions">
-                  <button onClick={() => handleUserSubmit('dont_know')} disabled={isProcessing} className="btn-secondary">Não sei</button>
-                  <button onClick={() => handleUserSubmit('not_me_request')} disabled={isProcessing} className="btn-secondary">Não é bem isso</button>
-                  <button onClick={() => handleUserSubmit('simplify_request')} disabled={isProcessing} className="btn-secondary">Explica melhor</button>
+                  {/* Chips de fricção */}
+                  <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap', justifyContent: 'center', width: '100%', marginTop: 12 }}>
+                    <button onClick={() => { stopListening(); handleUserSubmit('simplify_request'); }} disabled={isProcessing || isSpeaking} style={{ padding: '8px 16px', background: '#ffe4e6', color: '#be123c', border: 'none', borderRadius: 24, cursor: 'pointer', fontSize: '0.85rem' }}>
+                      Explica-me melhor
+                    </button>
+                    <button onClick={() => { stopListening(); handleUserSubmit('dont_know'); }} disabled={isProcessing || isSpeaking} style={{ padding: '8px 16px', background: '#f1f5f9', color: '#475569', border: 'none', borderRadius: 24, cursor: 'pointer', fontSize: '0.85rem' }}>
+                      Não sei
+                    </button>
+                  </div>
                 </div>
-              </div>
-            )}
+              )}
 
-            {mode === 'writing' && !connectionError && (
-              <div className="controls" style={{ marginTop: '24px' }}>
-                <button 
-                  onClick={() => {
-                    if (state.phase === 'closure_ready') {
-                       updateState({ phase: 'outcome_delivered' });
-                    } else {
-                       handleUserSubmit('auto');
-                    }
-                  }}
-                  disabled={isProcessing || (mode === 'writing' && !inputText.trim() && state.phase !== 'closure_ready')}
-                  className="btn-primary"
-                >
-                  {state.phase === 'closure_ready' ? 'Ver Leitura Final' : isProcessing ? 'A processar...' : 'Continuar'}
-                </button>
-              </div>
-            )}
-            
-            {(mode === 'conversation' && state.phase === 'closure_ready') && (
-              <div className="controls" style={{ marginTop: '24px' }}>
-                <button onClick={() => updateState({ phase: 'outcome_delivered' })} className="btn-primary" style={{ width: '100%' }}>
-                   Ver Leitura Final
-                </button>
-              </div>
-            )}
-            
-            {((phase as string) === 'outcome_delivered') && (
-               <div style={{ marginTop: '24px', borderTop: '1px solid #e2e8f0', paddingTop: '16px' }}>
-                  <button onClick={handleExportEcosystem} style={{ padding: '8px 16px', background: '#3b82f6', color: '#fff', borderRadius: '4px', border: 'none', cursor: 'pointer' }}>
-                     Exportar Leitura Interna (Ecossistema)
-                  </button>
-                  <button onClick={resetSession} style={{ padding: '8px 16px', background: 'transparent', color: '#64748b', border: 'none', cursor: 'pointer', marginLeft: '12px' }}>
-                     Limpar Sessão
-                  </button>
-                  <PostSessionFeedback onComplete={(feedback) => console.log('Feedback Final:', feedback)} />
-               </div>
-            )}
-          </div>
+              {mode === 'writing' && (
+                <>
+                  <div className="controls">
+                    <div className="secondary-actions">
+                      <button onClick={() => handleUserSubmit('dont_know')} disabled={isProcessing} className="btn-secondary">Não sei</button>
+                      <button onClick={() => handleUserSubmit('not_me_request')} disabled={isProcessing} className="btn-secondary">Não é bem isso</button>
+                      <button onClick={() => handleUserSubmit('simplify_request')} disabled={isProcessing} className="btn-secondary">Explica melhor</button>
+                    </div>
+                  </div>
+                  <div className="controls" style={{ marginTop: 24 }}>
+                    <button
+                      onClick={() => handleUserSubmit('auto')}
+                      disabled={isProcessing || !inputText.trim()}
+                      className="btn-primary"
+                    >
+                      {isProcessing ? 'A processar...' : 'Continuar'}
+                    </button>
+                  </div>
+                </>
+              )}
+            </div>
+          )}
         </div>
       </div>
       {!import.meta.env.PROD && <DebugPanel />}

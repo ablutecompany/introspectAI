@@ -1,67 +1,104 @@
 export type InternalStatePhase =
-  | 'opening'
-  | 'micro_triage'
-  | 'guided_exploration'
-  | 'deepening'
-  | 'contrast'
-  | 'closure_ready'
-  | 'outcome_delivered';
+  | 'SESSION_INIT'
+  | 'RESUME_CHECK'
+  | 'FIELD'
+  | 'NATURE'
+  | 'FUNCTION'
+  | 'COST'
+  | 'CONTRAST'
+  | 'DECIDE_NEXT'
+  | 'LATENT_READING'
+  | 'GUIDANCE'
+  | 'EXTENSION_CHECK'
+  | 'CLOSE'
+  | 'FOLLOWUP_RESUME'
+  | 'CONTINUATION_MODE_SELECT'
+  | 'CONTINUED_CLARIFICATION'
+  | 'CONTINUED_GUIDANCE';
 
 export type IntensityLevel = 'low' | 'medium' | 'high';
 export type ConfidenceLevel = 'insufficient' | 'moderate' | 'strong';
+export type ContinuityMode = 'resume' | 'reopen' | 'work_from_previous' | null;
 
-export interface InternalState {
+export interface SessionMeta {
   sessionId: string;
+  userId?: string;
+  isFirstSession: boolean;
+  isRegisteredUser: boolean;
   startedAt: number;
   updatedAt: number;
+  turnCount: number;
+  questionCount: number;
+  answerCount: number;
+}
+
+export interface GovernanceState {
+  userToleranceLevel: IntensityLevel;
+  conversationLoad: IntensityLevel;
+  clarificationNeed: IntensityLevel;
+  permissionToExtend: 'yes' | 'no' | 'not_asked';
+  sessionNovelty: 'first' | 'recurring';
+  fatigueSignals: string[];
+  metaConversationDetected: boolean;
+  valueDeliveredYet: boolean;
+  extensionCount: number;
+}
+
+export interface CaseStructure {
+  caseField: string | null;
+  surfaceTheme: string | null;
+  surfaceNature: string | null;
+  primaryFunction: string | null;
+  mainCost: string | null;
+  contrastResolution: string | null;
+  openAmbiguities: string[];
+}
+
+export interface LatentModel {
+  deeperTheme: string | null;
+  latentHypothesis: string | null;
+  centralTension: string | null;
+  maintenanceLoop: string | null;
+  hiddenCost: string | null;
+  confidenceLevel: ConfidenceLevel;
+}
+
+export interface GuidanceModel {
+  repositioningFrame: string | null;
+  keyDistinction: string | null;
+  prematureActionToAvoid: string | null;
+  microStep: string | null;
+  nextQuestionIfNeeded: string | null;
+}
+
+export interface ContinuityMemory {
+  priorCaseTheme: string | null;
+  priorLatentHypothesis: string | null;
+  priorPrimaryFunction: string | null;
+  priorCentralTension: string | null;
+  priorMainCost: string | null;
+  priorOpenAmbiguities: string[];
+  priorMicroStep: string | null;
+  userResponseToLastStep: string | null;
+  toleranceStyle: IntensityLevel | null;
+  preferredDepth: IntensityLevel | null;
+  preferredMode: ContinuityMode;
+}
+
+export interface InternalState {
   schemaVersion: number;
   appVersion: string;
   mode: 'conversation' | 'writing';
   phase: InternalStatePhase;
-  turnIndex: number;
 
-  // Hipóteses
-  dominantHypothesis: string | null;
-  secondaryHypothesis: string | null;
-  rivalHypotheses: string[];
+  sessionMeta: SessionMeta;
+  governance: GovernanceState;
+  caseStructure: CaseStructure;
+  latentModel: LatentModel;
+  guidanceModel: GuidanceModel;
+  continuityMemory: ContinuityMemory;
 
-  // Mapas de sinais
-  axisSignals: string[];
-  contextSignals: string[];
-  mechanismSignals: string[];
-  costSignals: string[];
-  fearSignals: string[];
-  desiredLifeSignals: string[];
-  protectiveSignals: string[];
-
-  // Clarificação
-  unresolvedQuestions: string[];
-  testedContrasts: string[];
-  pendingClarifications: string[];
-
-  // Fricção
-  needsSimplification: boolean;
-  needsRecentering: boolean;
-  needsExample: boolean;
-  needsContrasting: boolean;
-  fatigueLevel: IntensityLevel;
-  trustLevel: IntensityLevel;
-  consecutiveVagueAnswers: number;
-  consecutiveDeflectiveAnswers: number;
-
-  // Ação
-  actionableLevers: string[];
-  blockedLevers: string[];
-
-  // Fecho
-  confidenceLevel: ConfidenceLevel;
-  outcomeReadinessScore: number;
-  outcomeLevelCandidate: 0 | 1 | 2 | 3 | null;
-
-  // Memória operacional
+  // Memória operacional mínima para manter retrocompatibilidade / histórico
   askedQuestionIds: string[];
-  usedReframes: string[];
-  collectedExamples: string[];
-  keyUserPhrases: string[];
-  transcriptHistory: { role: 'human' | 'ai', text: string }[];
+  transcriptHistory: { role: 'human' | 'ai'; text: string }[];
 }

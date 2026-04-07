@@ -7,31 +7,32 @@ export async function askLLM(request: AskLLMRequest & { _requestId?: string }): 
   const startTime = Date.now();
   const reqId = request._requestId || 'no-id';
   console.log(`[LLM Client] ID: ${reqId} | Entered askLLM execution.`);
-  
+
   // 1. Conductor mandates next move
-  const forcedMove = request.forcedNextMove || 'ask_open';
-  
-  // 2. Build explicit locked prompt
+  const forcedMove = request.forcedNextMove || 'ask_field';
+
+  // 2. Build explicit locked prompt (phase-aware, includes blacklist and context)
   const { system, user } = PromptBuilder.build(request.internalState, request.userResponse, forcedMove);
-  console.log(`[LLM Client] ID: ${reqId} | Prompts built via Conductor.`);
-  
+  console.log(`[LLM Client] ID: ${reqId} | Prompts built via PromptBuilder.`);
+
   // 3. Ask provider
   console.log(`[LLM Client] ID: ${reqId} | Sending structured prompt to ProviderLayer...`);
   const res = await ProviderAdapter.requestOpenAI(system, user, reqId);
   const rawText = res.content;
   const activeProviderMode = res.providerMode;
-  console.log(`[LLM Client] ID: ${reqId} | Provider Adapter returned successfully. Content Length: ${rawText.length}`);
+  console.log(`[LLM Client] ID: ${reqId} | Provider Adapter returned. Content Length: ${rawText.length}`);
 
   const latency = Date.now() - startTime;
 
-  // 4. Validate through Zod constraints and apply Schema/Fallback overrides
+  // 4. Validate through Zod + Fallback overrides (Conductor Supremacy enforced inside LLMGuard)
+  const state = request.internalState;
   const finalResponse = LLMGuard.validate(rawText, forcedMove, {
-     sessionId: request.internalState.sessionId,
-     turnIndex: request.internalState.turnIndex,
-     phase: request.internalState.phase,
-     latency,
-     inputType: request.inputType || 'typed',
-     providerMode: activeProviderMode
+    sessionId: state.sessionMeta?.sessionId ?? 'unknown',
+    turnCount: state.sessionMeta?.turnCount ?? 0,
+    phase: state.phase,
+    latency,
+    inputType: request.inputType || 'typed',
+    providerMode: activeProviderMode
   });
 
   return finalResponse;

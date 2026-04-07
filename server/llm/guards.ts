@@ -5,29 +5,28 @@ import { SessionLogger } from '../logging/sessionLogger.js';
 
 export class LLMGuard {
   static validate(
-    rawText: string, 
-    requestedMove: LLMNextMoveType, 
-    context: { sessionId: string; turnIndex: number; phase: string; latency: number, inputType: string, providerMode: 'live'|'mock' }
+    rawText: string,
+    requestedMove: LLMNextMoveType,
+    context: { sessionId: string; turnCount: number; phase: string; latency: number; inputType: string; providerMode: 'live' | 'mock' }
   ): LLMInterviewResponse {
-    
+
     try {
-      // 1. Try to parse JSON from the raw text (which might be wrapped in markdown or partial)
+      // 1. Parse JSON — strip possible markdown fences
       const cleanedText = rawText.replace(/```json/g, '').replace(/```/g, '').trim();
       const parsedJson = JSON.parse(cleanedText);
-      
-      // 2. Validate against strict Zod Schema
+
+      // 2. Validate against Zod schema
       const validated = LLMInterviewResponseSchema.parse(parsedJson);
 
-      // 3. ENFORCE CONDUCTOR SUPREMACY
-      // If the LLM tries to be smart and change the next move type, we overwrite it.
+      // 3. CONDUCTOR SUPREMACY — overwrite any LLM-chosen move to honour the Conductor
       if (validated.nextMoveType !== requestedMove) {
-          validated.nextMoveType = requestedMove;
+        validated.nextMoveType = requestedMove;
       }
 
       SessionLogger.logAudit({
         timestamp: new Date().toISOString(),
         sessionId: context.sessionId,
-        turnIndex: context.turnIndex,
+        turnIndex: context.turnCount,
         phase: context.phase,
         requestedMove,
         inputType: context.inputType,
@@ -41,22 +40,22 @@ export class LLMGuard {
       return validated as LLMInterviewResponse;
 
     } catch (error: any) {
-      // 4. FALLBACK TRIGGERED
+      // 4. FALLBACK — log and return static safe response
       SessionLogger.logAudit({
         timestamp: new Date().toISOString(),
         sessionId: context.sessionId,
-        turnIndex: context.turnIndex,
+        turnIndex: context.turnCount,
         phase: context.phase,
         requestedMove,
         inputType: context.inputType,
         providerMode: context.providerMode,
         rawLLMResponse: rawText,
         fallbackTriggered: true,
-        error: error?.message || 'JSON Parse Schema Mismatch',
+        error: error?.message || 'JSON Parse / Schema Mismatch',
         latencyMs: context.latency
       });
 
-      return FALLBACKS[requestedMove];
+      return FALLBACKS[requestedMove] ?? FALLBACKS['recenter'];
     }
   }
 }

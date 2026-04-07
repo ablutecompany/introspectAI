@@ -1,4 +1,4 @@
-export type UserIntent = 'substantive' | 'vague' | 'deflective' | 'dont_know' | 'simplify_request' | 'not_me_request';
+export type UserIntent = 'substantive' | 'vague' | 'deflective' | 'dont_know' | 'simplify_request' | 'not_me_request' | 'meta_conversation';
 
 export class InputClassifier {
   static classify(text: string): UserIntent {
@@ -13,6 +13,11 @@ export class InputClassifier {
     
     if (['não é bem isso', 'nao é isso', 'errado', 'nada a ver', 'não sou eu'].includes(normalized)) {
       return 'not_me_request';
+    }
+
+    const metaConversationPhrases = ['estás em loop', 'já respondi', 'não gosto de me repetir', 'isso já dei', 'não tenho mais para acrescentar', 'estás a torcer o que eu disse', 'já disse'];
+    if (metaConversationPhrases.some(p => normalized.includes(p))) {
+      return 'meta_conversation';
     }
     
     const vaguePhrases = ['mais ou menos', 'talvez', 'um bocado', 'coisas', 'não sei bem como explicar'];
