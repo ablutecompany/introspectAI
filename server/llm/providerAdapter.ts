@@ -1,15 +1,10 @@
 export class ProviderAdapter {
   static async requestOpenAI(sysPrompt: string, userPrompt: string, reqId: string = 'no-id', retries = 2): Promise<{content: string, providerMode: 'live' | 'mock'}> {
     const apiKey = process.env.OPENAI_API_KEY;
-    const forceMock = process.env.FORCE_MOCK === 'true';
 
-    // Use Mock only if strictly forced or locally missing keys
-    if (forceMock || (!apiKey || apiKey === 'undefined')) {
-       console.log(`[OpenAI Adapter] ID: ${reqId} | Missing API KEY or FORCE_MOCK enabled. Falling back to MOCK.`);
-       return Promise.resolve({
-         content: this.mockJsonResolver(sysPrompt, userPrompt),
-         providerMode: 'mock'
-       });
+    if (!apiKey || apiKey === 'undefined') {
+       console.error(`[OpenAI Adapter] ID: ${reqId} | CRITICAL: PRODUCTION MISSING OPENAI_API_KEY.`);
+       throw new Error("A produção central ainda não está configurada com a chave do motor inteligente (OPENAI_API_KEY em falta).");
     }
 
     try {
@@ -56,17 +51,5 @@ export class ProviderAdapter {
     }
   }
 
-  private static mockJsonResolver(sys: string, user: string): string {
-     // A mock resolver to test local components if API keys drop
-     const forcedMoveMatch = sys.match(/"nextMoveType":\s*"([^"]+)"/);
-     const moveInfo = forcedMoveMatch ? forcedMoveMatch[1] : 'ask_open';
-     
-     // Returning human-like fallback context instead of purely tech strings, hiding tech jargon from production fails
-     return JSON.stringify({
-        nextMoveType: moveInfo,
-        userFacingText: "Percebo o impacto profundo que isso tem. Quando é que sentes isso com mais intensidade?",
-        extractedSignals: { contexts: [], costs: [], fears: [], mechanisms: [] },
-        suggestedUpdates: { confidenceHint: "moderate" }
-     });
-  }
+  // MockResolver Deleted natively
 }

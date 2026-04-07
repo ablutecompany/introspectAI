@@ -22,7 +22,7 @@ export default function App() {
   const [lastMoveType, setLastMoveType] = useState<string | null>(null);
   const [inputText, setInputText] = useState("");
   const [isProcessing, setIsProcessing] = useState(false);
-  const [connectionError, setConnectionError] = useState<{ failedText: string, failedIntent: UserIntent | 'auto' } | null>(null);
+  const [connectionError, setConnectionError] = useState<{ failedText: string, failedIntent: UserIntent | 'auto', errorMessage?: string } | null>(null);
   
   // Only start in a resuming state if we ACTUALLY mount with an existing active session > 0
   const [isResuming, setIsResuming] = useState(() => useSessionStore.getState().turnIndex > 0);
@@ -126,8 +126,13 @@ export default function App() {
       });
       
       if (!apiReq.ok) {
-         console.error(`[Frontend Submit] ID: ${requestId} | Native API Error Status: ${apiReq.status} ${apiReq.statusText}`);
-         throw new Error(`Proxy status: ${apiReq.status}`);
+         let errorStr = apiReq.statusText;
+         try {
+            const errBody = await apiReq.json();
+            if (errBody && errBody.error) errorStr = errBody.error;
+         } catch(ignored) {}
+         console.error(`[Frontend Submit] ID: ${requestId} | Native API Error Status: ${apiReq.status} | Detailed: ${errorStr}`);
+         throw new Error(errorStr);
       }
       
       response = await apiReq.json();
@@ -136,7 +141,8 @@ export default function App() {
       console.error(`[Frontend Submit] API Loop Failure | ID: ${requestId} | Error:`, e);
       stopListening();
       stopTTS();
-      setConnectionError({ failedText: finalUserText, failedIntent: intent as any });
+      // Store the specific error so UI can adapt
+      setConnectionError({ failedText: finalUserText, failedIntent: intent as any, errorMessage: e?.message });
       setIsProcessing(false);
       return; 
     }
@@ -230,7 +236,11 @@ export default function App() {
             <div style={{ textAlign: 'center', display: 'flex', flexDirection: 'column', alignItems: 'center', maxWidth: '400px', width: '100%' }}>
                <div style={{ padding: '24px', background: '#fee2e2', borderRadius: '12px', color: '#b91c1c', width: '100%', marginBottom: '32px', border: '1px solid #fca5a5', boxShadow: '0 8px 16px rgba(185, 28, 28, 0.1)' }}>
                   <strong style={{ fontSize: '1.2rem', display: 'block', marginBottom: '12px' }}>Falha na Ligação</strong>
-                  <span style={{ fontSize: '0.95rem', lineHeight: '1.5' }}>Não foi possível contactar o motor. Não te preocupes, o teu progresso exato está preservado localmente.</span>
+                  <span style={{ fontSize: '0.95rem', lineHeight: '1.5' }}>
+                     {connectionError.errorMessage?.includes('OPENAI_API_KEY') 
+                       ? "A produção ainda não está ligada ao motor real. (OPENAI_API_KEY em falta)" 
+                       : "Não foi possível contactar o motor. Não te preocupes, o teu progresso exato está preservado localmente."}
+                  </span>
                </div>
                <button onClick={() => recoverFromConnectionError()} className="btn-primary" style={{ marginBottom: '32px', background: '#ef4444', padding: '16px 32px', fontSize: '1.1rem', width: '100%' }}>
                   Tentar de novo
