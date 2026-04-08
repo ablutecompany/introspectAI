@@ -4,8 +4,8 @@ import { ConductorEngine } from '../engine/conductor';
 import { StateUpdater } from '../engine/updateState';
 import { InputClassifier } from '../engine/classifyInput';
 import type { UserIntent } from '../engine/classifyInput';
-import { useSpeechInput } from '../hooks/useSpeechInput';
-import { useTTS } from '../hooks/useTTS';
+import { useVoiceController } from '../features/voice/useVoiceController';
+import { matchVoiceToTriageArea } from '../features/voice/voiceMatching';
 import { PostSessionFeedback } from '../features/feedback/PostSessionFeedback';
 import { DebugPanel } from '../dev/DebugPanel';
 import { TriageFlow } from '../features/triage/TriageFlow';
@@ -73,8 +73,14 @@ export default function App() {
     setMode, updateState, incrementTurn, resetSession, setTriageState
   } = useSessionStore();
 
-  const { isListening, transcript, toggleListening, startListening, stopListening, manualSetTranscript, error: sttError, isSupported } = useSpeechInput();
-  const { speak, stop: stopTTS, isSpeaking } = useTTS();
+  const { 
+    voiceState, 
+    speakLine, 
+    startListening, 
+    stopListening, 
+    stopSpeaking, 
+    toggleAudioMode 
+  } = useVoiceController();
 
   const [currentQuestion, setCurrentQuestion] = useState('');
   const [lastMoveType, setLastMoveType] = useState<string | null>(null);
@@ -84,30 +90,33 @@ export default function App() {
   const [showTranscriptInput, setShowTranscriptInput] = useState(false);
   const [isResuming, setIsResuming] = useState(() => useSessionStore.getState().sessionMeta.turnCount > 0);
 
+  // Derived voice variables for retrocompatibility
+  const isListening = voiceState.status === 'listening';
+  const isSpeaking = voiceState.status === 'speaking';
+  const isSupported = voiceState.isSupportedSTT;
+  const transcript = voiceState.transcriptDraft;
+  const sttError = voiceState.lastError;
+  const stopTTS = stopSpeaking;
+  const toggleListening = () => {
+    if (isListening) stopListening();
+    else startListening((f) => setInputText(f), (i) => setInputText(i));
+  };
+  const manualSetTranscript = (t: string) => {
+    useSessionStore.setState(s => ({ ...s, voiceState: { ...s.voiceState, transcriptDraft: t } }));
+  };
+
   // TTS auto-play on new question in conversation mode
   useEffect(() => {
     if (mode === 'conversation' && currentQuestion) {
-      speak(currentQuestion, () => {
-        if (sessionMeta.turnCount > 0) startListening();
-      });
+      speakLine(currentQuestion);
     }
-  }, [currentQuestion, mode]);
+  }, [currentQuestion, mode, speakLine]);
 
   // Reset resuming flag when session is brand new
   useEffect(() => {
     if (sessionMeta.turnCount === 0) setIsResuming(false);
   }, [sessionMeta.turnCount]);
 
-  // Auto-submit on voice silence
-  useEffect(() => {
-    if (mode === 'conversation' && sessionMeta.turnCount > 0 && isListening && transcript.trim().length >= 4) {
-      const timeout = setTimeout(() => {
-        stopListening();
-        handleUserSubmit('auto');
-      }, 2200);
-      return () => clearTimeout(timeout);
-    }
-  }, [transcript, isListening, mode, sessionMeta.turnCount]);
 
   // Connection error recovery via voice
   useEffect(() => {
@@ -132,13 +141,26 @@ export default function App() {
     stopListening();
     stopTTS();
     const isVoiceTurn = mode === 'conversation' && rawIntent === 'auto';
-    const finalUserText = overrideText || (isVoiceTurn ? transcript : inputText);
+    const finalUserText = overrideText || inputText;
     if (!finalUserText.trim() && rawIntent === 'auto') return;
 
     setIsProcessing(true);
     const state = useSessionStore.getState();
-    const textToClassify = rawIntent === 'auto' ? finalUserText : String(rawIntent);
-    const intent: UserIntent = rawIntent !== 'auto' ? (rawIntent as UserIntent) : InputClassifier.classify(textToClassify);
+    
+    // Normalization mapping from voice to Triagem
+    let textToClassify = finalUserText;
+    let mappedRawIntent = rawIntent;
+    
+    // Triage mapping for audio
+    if (rawIntent === 'auto' && CHIP_PHASES.has(phase)) {
+       const mappedArea = matchVoiceToTriageArea(finalUserText);
+       if (mappedArea !== 'unmatched') {
+          // Hardcode force area intent when detected by heurístics
+          mappedRawIntent = mappedArea as any; 
+       }
+    }
+
+    const intent: UserIntent = mappedRawIntent !== 'auto' ? (mappedRawIntent as UserIntent) : InputClassifier.classify(textToClassify);
 
     // --- GOVERNANCE INTERCEPT ---
     if (phase !== 'EXTENSION_CHECK' && phase !== 'CLOSE' && CHIP_PHASES.has(phase)) {
@@ -214,16 +236,15 @@ export default function App() {
     setCurrentQuestion(response.userFacingText);
     setLastMoveType(response.nextMoveType || nextMove);
     setInputText('');
-    manualSetTranscript('');
+    stopListening(); // Se o input fechar e ele ainda ouvia
     setShowTranscriptInput(false);
     incrementTurn();
     setIsProcessing(false);
-  }, [mode, transcript, inputText, stopListening, stopTTS, updateState, incrementTurn, manualSetTranscript]);
+  }, [mode, inputText, stopListening, updateState, incrementTurn]);
 
   // ─── Chip click handler ───────────────────────────────────────────────────────
   const handleChipClick = (chipText: string) => {
     stopListening();
-    manualSetTranscript(chipText);
     handleUserSubmit('substantive', chipText);
   };
 

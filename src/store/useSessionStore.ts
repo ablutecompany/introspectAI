@@ -33,6 +33,16 @@ const buildInitialState = (): Omit<InternalState, 'schemaVersion' | 'appVersion'
       shouldCloseAfterThisTurn: false
     },
 
+    voiceState: {
+      status: 'idle',
+      isSupportedSTT: false, // We will evaluate on mount
+      isSupportedTTS: false, // We will evaluate on mount
+      transcriptDraft: '',
+      lastSpokenText: null,
+      lastError: null,
+      audioModeEnabled: false
+    },
+
     mode: 'conversation',
     phase: 'TRIAGE',
     

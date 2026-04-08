@@ -157,6 +157,20 @@ export interface ContinuityMemory {
   preferredMode: ContinuityMode;
 }
 
+// ─── Voice State ───────────────────────────────────────────────────────────────
+
+export type VoiceStatus = 'idle' | 'listening' | 'processing' | 'speaking' | 'error';
+
+export interface VoiceState {
+  status: VoiceStatus;
+  isSupportedSTT: boolean;
+  isSupportedTTS: boolean;
+  transcriptDraft: string;
+  lastSpokenText: string | null;
+  lastError: string | null;
+  audioModeEnabled: boolean;
+}
+
 export interface InternalState {
   schemaVersion: number;
   appVersion: string;
@@ -178,4 +192,6 @@ export interface InternalState {
   // Memória operacional mínima para manter retrocompatibilidade / histórico
   askedQuestionIds: string[];
   transcriptHistory: { role: 'human' | 'ai'; text: string }[];
+  
+  voiceState: VoiceState;
 }
