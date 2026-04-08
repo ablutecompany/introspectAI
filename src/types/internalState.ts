@@ -1,21 +1,5 @@
 export type InternalStatePhase =
   | 'TRIAGE'
-  | 'SESSION_INIT'
-  | 'RESUME_CHECK'
-  | 'FIELD'
-  | 'NATURE'
-  | 'FUNCTION'
-  | 'COST'
-  | 'CONTRAST'
-  | 'DECIDE_NEXT'
-  | 'LATENT_READING'
-  | 'GUIDANCE'
-  | 'EXTENSION_CHECK'
-  | 'CLOSE'
-  | 'FOLLOWUP_RESUME'
-  | 'CONTINUATION_MODE_SELECT'
-  | 'CONTINUED_CLARIFICATION'
-  | 'CONTINUED_GUIDANCE'
   | 'LATENT_READING_DISPLAY'
   | 'CONTINUATION_ACTIVE'
   | 'CLOSE_NOW';
@@ -116,46 +100,7 @@ export interface ContinuationState {
   outputPayload?: ContinuationOutput;
 }
 
-export interface CaseStructure {
-  caseField: string | null;
-  surfaceTheme: string | null;
-  surfaceNature: string | null;
-  primaryFunction: string | null;
-  mainCost: string | null;
-  contrastResolution: string | null;
-  openAmbiguities: string[];
-}
 
-export interface LatentModel {
-  deeperTheme: string | null;
-  latentHypothesis: string | null;
-  centralTension: string | null;
-  maintenanceLoop: string | null;
-  hiddenCost: string | null;
-  confidenceLevel: ConfidenceLevel;
-}
-
-export interface GuidanceModel {
-  repositioningFrame: string | null;
-  keyDistinction: string | null;
-  prematureActionToAvoid: string | null;
-  microStep: string | null;
-  nextQuestionIfNeeded: string | null;
-}
-
-export interface ContinuityMemory {
-  priorCaseTheme: string | null;
-  priorLatentHypothesis: string | null;
-  priorPrimaryFunction: string | null;
-  priorCentralTension: string | null;
-  priorMainCost: string | null;
-  priorOpenAmbiguities: string[];
-  priorMicroStep: string | null;
-  userResponseToLastStep: string | null;
-  toleranceStyle: IntensityLevel | null;
-  preferredDepth: IntensityLevel | null;
-  preferredMode: ContinuityMode;
-}
 
 // ─── Voice State ───────────────────────────────────────────────────────────────
 
@@ -179,19 +124,7 @@ export interface InternalState {
 
   sessionMeta: SessionMeta;
   governance: GovernanceState;
-  caseStructure: CaseStructure;
-  latentModel: LatentModel;
-  guidanceModel: GuidanceModel;
-  continuityMemory: ContinuityMemory;
-
-  /** Triage output — null until triage is completed */
   triageState: TriageState | null;
-
   continuationState: ContinuationState;
-
-  // Memória operacional mínima para manter retrocompatibilidade / histórico
-  askedQuestionIds: string[];
-  transcriptHistory: { role: 'human' | 'ai'; text: string }[];
-  
   voiceState: VoiceState;
 }

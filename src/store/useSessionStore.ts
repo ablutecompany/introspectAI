@@ -74,51 +74,7 @@ const buildInitialState = (): Omit<InternalState, 'schemaVersion' | 'appVersion'
       shouldCloseNow: false,
       budgetProfile: 'first_session_short',
       lastGovernanceReason: null
-    },
-
-    caseStructure: {
-      caseField: null,
-      surfaceTheme: null,
-      surfaceNature: null,
-      primaryFunction: null,
-      mainCost: null,
-      contrastResolution: null,
-      openAmbiguities: []
-    },
-
-    latentModel: {
-      deeperTheme: null,
-      latentHypothesis: null,
-      centralTension: null,
-      maintenanceLoop: null,
-      hiddenCost: null,
-      confidenceLevel: 'insufficient'
-    },
-
-    guidanceModel: {
-      repositioningFrame: null,
-      keyDistinction: null,
-      prematureActionToAvoid: null,
-      microStep: null,
-      nextQuestionIfNeeded: null
-    },
-
-    continuityMemory: {
-      priorCaseTheme: null,
-      priorLatentHypothesis: null,
-      priorPrimaryFunction: null,
-      priorCentralTension: null,
-      priorMainCost: null,
-      priorOpenAmbiguities: [],
-      priorMicroStep: null,
-      userResponseToLastStep: null,
-      toleranceStyle: null,
-      preferredDepth: null,
-      preferredMode: null
-    },
-
-    askedQuestionIds: [],
-    transcriptHistory: []
+    }
   };
 };
 
@@ -156,7 +112,7 @@ export const useSessionStore = create<SessionStore>()(
 
       setTriageState: (triage) => set((state) => ({
         triageState: triage,
-        phase: 'SESSION_INIT',
+        phase: 'LATENT_READING_DISPLAY',
         sessionMeta: { ...state.sessionMeta, updatedAt: now() }
       })),
     }),
