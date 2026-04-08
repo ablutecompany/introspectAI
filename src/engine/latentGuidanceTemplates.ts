@@ -81,43 +81,78 @@ export const MODULADORES_OBJETIVO: Record<ImmediateGoal, string> = {
   F: 'Mantendo o passo contido à velocidade do que é possível digerir sem saturar o que já está trancado.'
 };
 
+/** Função pura determinística para hash e seeding */
+function pickVariant(variants: string[], inputStr: string): string {
+  const sum = inputStr.split('').reduce((acc, char) => acc + char.charCodeAt(0), 0);
+  return variants[sum % variants.length];
+}
+
 /** Função pura para madlib do LATENTE */
 export function buildLatentText(mode: 'MODE_STANDARD' | 'MODE_PROVISIONAL' | 'MODE_EARLY_CLOSE', surfaceTheme: string, latentData: any, secondaryAreaLabel: string | null): string {
   const surface = surfaceTheme.toLowerCase();
   
   if (mode === 'MODE_EARLY_CLOSE') {
-    return `Mesmo fechando sem puxar muito, isto parece tocar numa tensão sensível entre ${latentData.tension[0]} e ${latentData.tension[1]}.`;
+    const openers = [`Mesmo parando por aqui, fica um nó sensível. Pareces estar preso entre`, `Fechando já: o eixo principal disto toca numa tensão entre`];
+    return `${pickVariant(openers, surface)} ${latentData.tension[0]} e ${latentData.tension[1]}.`;
   }
 
   if (mode === 'MODE_PROVISIONAL') {
-    return `Mesmo com poucos dados estritos, isto não soa totalmente simples. Pode haver aqui mais do que a zona de ${surface}, sobretudo numa tensão profunda entre ${latentData.tension[0]} e ${latentData.tension[1]}. O risco de não olhar para isto é que ${latentData.cost}.`;
+    const provOpeners = [
+      `Mesmo sem esgotar o tema, isto soa mais profundo do que a típica zona de ${surface}.`,
+      `Ouço aqui algo que foge ao simples diagnóstico de ${surface}.`
+    ];
+    return `${pickVariant(provOpeners, surface)} Parece haver uma tensão profunda entre ${latentData.tension[0]} e ${latentData.tension[1]}. O risco maior de ignorar isto, é que ${latentData.cost}.`;
   }
 
   // STANDARD
-  let str = `Isto pode não estar a pesar só como a típica questão de ${surface}. Há sinais de que pode também estar em jogo ${latentData.base}. `;
+  const stdOpeners = [
+    `Isto não me parece esgotar-se apenas no pacote habitual de ${surface}. Há sinais de que há aqui ${latentData.base}.`,
+    `A forma como falas mostra que este tema foge da simples questão de ${surface}. Pareces debater-te bastante com ${latentData.base}.`
+  ];
+  
+  let str = `${pickVariant(stdOpeners, surface)} `;
   if (secondaryAreaLabel) {
-    str += `E embora se manifeste aqui, começa subtilmente a tocar também na área de ${secondaryAreaLabel}. `;
+    const secVariations = [
+      `Ganha contornos noutros sítios. Há um claro pisar também na zona de ${secondaryAreaLabel}. `,
+      `E embora expluda aqui, as ondas de choque já tocam muito em questões de ${secondaryAreaLabel}. `
+    ];
+    str += pickVariant(secVariations, secondaryAreaLabel);
   }
-  str += `O ponto de tensão central parece balançar entre ${latentData.tension[0]} e ${latentData.tension[1]}. O grande custo invisível nisto é que ${latentData.cost}.`;
+  
+  const tensionVariations = [
+    `No meio disto está o impasse: por um lado, ${latentData.tension[0]}; por outro, ${latentData.tension[1]}.`,
+    `A corda estica nos dois lados. Um lado puxa para ${latentData.tension[0]}. O outro defende-se com ${latentData.tension[1]}.`
+  ];
+  
+  str += ` ${pickVariant(tensionVariations, surface)} O preço invisível a pagar? É que possivelmente ${latentData.cost}.`;
   return str;
 }
 
 /** Função pura para madlib do GUIDANCE */
 export function buildGuidanceText(mode: 'MODE_STANDARD' | 'MODE_PROVISIONAL' | 'MODE_EARLY_CLOSE', guidanceData: any, objectiveLabel: string): string {
-  
   if (mode === 'MODE_EARLY_CLOSE') {
-    return `Para já, e de forma bem contida: ${objectiveLabel} O mais vital é não misturar ${guidanceData.distinction[0]} com ${guidanceData.distinction[1]}. O teu micro-passo é tentar ${guidanceData.micro_step}.`;
+    return `Uma baliza curta: ${objectiveLabel} Podes começar só por não misturar ${guidanceData.distinction[0]} com ${guidanceData.distinction[1]}. Passo a passo: tenta ${guidanceData.micro_step}.`;
   }
-
+  
   if (mode === 'MODE_PROVISIONAL') {
-    return `Atuando de forma prudente nesta fase cruzada: não convém ${guidanceData.avoid_now}. O foco para arrancar é distinguir ${guidanceData.distinction[0]} de ${guidanceData.distinction[1]}. ${objectiveLabel}`;
+    return `Não convém ${guidanceData.avoid_now}. O foco inicial prudente é saberes distinguir ${guidanceData.distinction[0]} de ${guidanceData.distinction[1]}. ${objectiveLabel}`;
   }
 
   // STANDARD
-  return `O meu primeiro convite sobre orientação prática é que tentes ${guidanceData.repositioning}. Aquilo que deves mesmo evitar para já é ${guidanceData.avoid_now}. Convém que comeces ativamente a separar ${guidanceData.distinction[0]} de ${guidanceData.distinction[1]}. ${objectiveLabel} Como micro-passo prático esta semana? Tenta ativamente ${guidanceData.micro_step}.`;
+  const repositionArray = [
+    `A minha sugestão prática de orientação é que ${guidanceData.repositioning}.`,
+    `Temos de rodar o ângulo. Não me parece boa ideia continuares em repetição; em vez disso, foca-te em ${guidanceData.repositioning}.`
+  ];
+
+  return `${pickVariant(repositionArray, objectiveLabel)} A armadilha agora é que cedas à pressão e decidas logo ${guidanceData.avoid_now}. Em vez de tentar deitar a parede a baixo, separa os tijolos: distingue bem o que é ${guidanceData.distinction[0]}, daquilo que é no fundo apenas ${guidanceData.distinction[1]}. ${objectiveLabel} Como exercício observável e silencioso: ${guidanceData.micro_step}.`;
 }
 
 /** Fecho */
 export function buildClosingLine(): string {
-  return "Faz este mapeamento para ti. Quando tiveres isto afinado e o passo tentado, estarei aqui sem qualquer expectativa de performance, pronto para continuar o nosso alinhamento estrutural.";
+  const fechos = [
+    "Faz este mapeamento íntimo e, quando detetares a quebra, retoma a sessão. Sem pressões de performance.",
+    "Leva isto contigo para hoje. Tenta o pequeno distanciamento prático. Retoma amanhã se a poeira baixar.",
+    "O que importa não é resolver numa hora, é mudar a qualidade de como medes o problema. Falamos depois."
+  ];
+  return fechos[Math.floor(Math.random() * fechos.length)];
 }
