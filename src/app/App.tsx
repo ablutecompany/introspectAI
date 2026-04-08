@@ -73,7 +73,7 @@ export default function App() {
   // ─── Render: LATENT READING DISPLAY ──────────────────────────────────────────
   if (phase === 'LATENT_READING_DISPLAY') {
     if (!triageState) return null;
-    const motorOutput = buildLatentAndGuidanceDeterministic(triageState);
+    const motorOutput = buildLatentAndGuidanceDeterministic(useSessionStore.getState());
     
     const handleProceed = () => {
       stopSpeaking();
