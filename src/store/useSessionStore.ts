@@ -1,16 +1,17 @@
 import { create } from 'zustand';
 import { persist, createJSONStorage } from 'zustand/middleware';
-import type { InternalState } from '../types/internalState';
+import type { InternalState, TriageState } from '../types/internalState';
 
 interface SessionStore extends InternalState {
   setMode: (mode: 'conversation' | 'writing') => void;
   updateState: (partial: Partial<InternalState>) => void;
   incrementTurn: () => void;
   resetSession: () => void;
+  setTriageState: (triage: TriageState) => void;
 }
 
-const CURRENT_SCHEMA_VERSION = 3;
-const CURRENT_APP_VERSION = 'v3.0.Engine';
+const CURRENT_SCHEMA_VERSION = 4;
+const CURRENT_APP_VERSION = 'v4.0.Triage';
 const EXPIRY_DAYS = 7;
 
 const generateSessionId = () => Math.random().toString(36).substring(2, 10);
@@ -19,8 +20,9 @@ const now = () => Date.now();
 const buildInitialState = (): Omit<InternalState, 'schemaVersion' | 'appVersion'> => {
   const time = now();
   return {
+    triageState: null,
     mode: 'conversation',
-    phase: 'SESSION_INIT',
+    phase: 'TRIAGE',
     
     sessionMeta: {
       sessionId: generateSessionId(),
@@ -42,7 +44,14 @@ const buildInitialState = (): Omit<InternalState, 'schemaVersion' | 'appVersion'
       fatigueSignals: [],
       metaConversationDetected: false,
       valueDeliveredYet: false,
-      extensionCount: 0
+      extensionCount: 0,
+      extensionOffered: false,
+      extensionAccepted: null,
+      shouldStopInterviewing: false,
+      shouldAskExtension: false,
+      shouldCloseNow: false,
+      budgetProfile: 'first_session_short',
+      lastGovernanceReason: null
     },
 
     caseStructure: {
@@ -122,6 +131,12 @@ export const useSessionStore = create<SessionStore>()(
          appVersion: CURRENT_APP_VERSION, 
          ...buildInitialState() 
       }),
+
+      setTriageState: (triage) => set((state) => ({
+        triageState: triage,
+        phase: 'SESSION_INIT',
+        sessionMeta: { ...state.sessionMeta, updatedAt: now() }
+      })),
     }),
     {
       name: 'introspect-session-storage',

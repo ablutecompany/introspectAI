@@ -8,6 +8,12 @@ import { useSpeechInput } from '../hooks/useSpeechInput';
 import { useTTS } from '../hooks/useTTS';
 import { PostSessionFeedback } from '../features/feedback/PostSessionFeedback';
 import { DebugPanel } from '../dev/DebugPanel';
+import { TriageFlow } from '../features/triage/TriageFlow';
+import { mapTriageToCaseStructure } from '../engine/triageEngine';
+import type { TriageState } from '../types/internalState';
+import { evaluateGovernanceNextStep } from '../engine/governanceEngine';
+import { GOVERNANCE_TEMPLATES } from '../engine/governanceTemplates';
+import { buildLatentAndGuidanceDeterministic } from '../engine/latentGuidanceEngine';
 import './index.css';
 
 // ─── Chip Maps por fase ───────────────────────────────────────────────────────
@@ -63,7 +69,7 @@ const CHIP_PHASES = new Set(['FIELD', 'NATURE', 'FUNCTION', 'COST']);
 export default function App() {
   const {
     mode, phase, sessionMeta, governance, caseStructure, latentModel, guidanceModel,
-    setMode, updateState, incrementTurn, resetSession
+    setMode, updateState, incrementTurn, resetSession, setTriageState
   } = useSessionStore();
 
   const { isListening, transcript, toggleListening, startListening, stopListening, manualSetTranscript, error: sttError, isSupported } = useSpeechInput();
@@ -132,8 +138,39 @@ export default function App() {
     const state = useSessionStore.getState();
     const textToClassify = rawIntent === 'auto' ? finalUserText : String(rawIntent);
     const intent: UserIntent = rawIntent !== 'auto' ? (rawIntent as UserIntent) : InputClassifier.classify(textToClassify);
-    const nextMove = ConductorEngine.decideNextMove(state, intent);
 
+    // --- GOVERNANCE INTERCEPT ---
+    if (phase !== 'EXTENSION_CHECK' && phase !== 'CLOSE' && CHIP_PHASES.has(phase)) {
+      const govDecision = evaluateGovernanceNextStep(state, finalUserText);
+      
+      if (govDecision.action === 'close_now') {
+         updateState({ 
+            phase: 'CLOSE',
+            governance: { ...state.governance, shouldCloseNow: true, lastGovernanceReason: govDecision.reason }
+         });
+         setCurrentQuestion(
+            govDecision.reason === 'meta_conversation' 
+              ? GOVERNANCE_TEMPLATES.ACKNOWLEDGE_META 
+              : GOVERNANCE_TEMPLATES.CLOSE_WITHOUT_EXTENSION
+         );
+         setLastMoveType('deliver_close');
+         setIsProcessing(false);
+         return;
+      }
+      
+      if (govDecision.action === 'ask_extension') {
+         updateState({ 
+            phase: 'EXTENSION_CHECK',
+            governance: { ...state.governance, shouldAskExtension: true, extensionOffered: true, lastGovernanceReason: govDecision.reason }
+         });
+         setCurrentQuestion(GOVERNANCE_TEMPLATES.ASK_EXTENSION(govDecision.missingElement || 'um ponto', govDecision.maxAdditionalQuestions || 1));
+         setLastMoveType('ask_extension_permission');
+         setIsProcessing(false);
+         return;
+      }
+    }
+
+    const nextMove = ConductorEngine.decideNextMove(state, intent);
     const requestId = crypto.randomUUID();
 
     let response;
@@ -231,6 +268,27 @@ export default function App() {
 
   const state = useSessionStore.getState();
 
+  // ─── Render: TRIAGE ──────────────────────────────────────────────────────────
+  if (phase === 'TRIAGE') {
+    const handleTriageComplete = (triage: TriageState) => {
+      const caseStructurePatch = mapTriageToCaseStructure(triage);
+      setTriageState(triage);
+      updateState({
+        caseStructure: {
+          ...caseStructure,
+          ...caseStructurePatch,
+        },
+      });
+    };
+
+    return (
+      <div style={{ minHeight: '100vh', background: 'var(--bg-color)' }}>
+        <TriageFlow onComplete={handleTriageComplete} />
+        {!import.meta.env.PROD && <DebugPanel />}
+      </div>
+    );
+  }
+
   // ─── Render: SESSION_INIT (Splash) ────────────────────────────────────────────
   if (phase === 'SESSION_INIT') {
     return (
@@ -292,37 +350,25 @@ export default function App() {
 
   // ─── Render: CLOSE ────────────────────────────────────────────────────────────
   if (phase === 'CLOSE') {
+    const motorOutput = buildLatentAndGuidanceDeterministic(state);
+
     return (
       <div className="container" style={{ padding: '0 2rem' }}>
-        <div className="splash" style={{ maxWidth: 600 }}>
-          <h1 style={{ marginBottom: '0.5rem', fontSize: '1.4rem' }}>Leitura</h1>
-          {latentModel.latentHypothesis && (
-            <div style={{ textAlign: 'left', background: 'var(--accent-base)', border: '1px solid var(--border-color)', borderRadius: 12, padding: 24, fontSize: '0.95rem', lineHeight: 1.7, color: 'var(--text-muted)', marginBottom: 24 }}>
-              {latentModel.latentHypothesis}
-            </div>
-          )}
-          {(guidanceModel.repositioningFrame || guidanceModel.microStep) && (
-            <div style={{ textAlign: 'left', borderRadius: 12, padding: '0 4px', marginBottom: 24 }}>
-              {guidanceModel.repositioningFrame && (
-                <div style={{ marginBottom: 16 }}>
-                  <strong style={{ color: 'var(--text-main)', display: 'block', marginBottom: 6, fontSize: '0.8rem', textTransform: 'uppercase', letterSpacing: '0.05em' }}>Reposicionamento</strong>
-                  <p style={{ margin: 0, color: 'var(--text-muted)', lineHeight: 1.6 }}>{guidanceModel.repositioningFrame}</p>
-                </div>
-              )}
-              {guidanceModel.keyDistinction && (
-                <div style={{ marginBottom: 16 }}>
-                  <strong style={{ color: 'var(--text-main)', display: 'block', marginBottom: 6, fontSize: '0.8rem', textTransform: 'uppercase', letterSpacing: '0.05em' }}>Distinção</strong>
-                  <p style={{ margin: 0, color: 'var(--text-muted)', lineHeight: 1.6 }}>{guidanceModel.keyDistinction}</p>
-                </div>
-              )}
-              {guidanceModel.microStep && (
-                <div style={{ background: 'var(--accent-base)', border: '1px solid var(--border-color)', borderRadius: 8, padding: 16 }}>
-                  <strong style={{ color: 'var(--text-main)', display: 'block', marginBottom: 6, fontSize: '0.8rem', textTransform: 'uppercase', letterSpacing: '0.05em' }}>Micro-passo</strong>
-                  <p style={{ margin: 0, color: 'var(--text-muted)', lineHeight: 1.6 }}>{guidanceModel.microStep}</p>
-                </div>
-              )}
-            </div>
-          )}
+        <div className="splash" style={{ maxWidth: 640 }}>
+          <h1 style={{ marginBottom: '1.5rem', fontSize: '1.4rem' }}>Leitura e Próximo Passo</h1>
+          
+          <div style={{ textAlign: 'left', background: 'var(--accent-base)', border: '1px solid var(--border-color)', borderRadius: 12, padding: 24, fontSize: '0.95rem', lineHeight: 1.7, color: 'var(--text-main)', marginBottom: 24 }}>
+            <p style={{ margin: '0 0 16px 0', color: 'var(--text-muted)' }}>
+              {motorOutput.latentParagraph}
+            </p>
+            <p style={{ margin: '0 0 16px 0', color: 'var(--text-muted)' }}>
+              {motorOutput.guidanceParagraph}
+            </p>
+            <p style={{ margin: 0, fontWeight: 500, color: 'var(--text-main)' }}>
+              {motorOutput.closingLine}
+            </p>
+          </div>
+
           <PostSessionFeedback onComplete={(feedback) => console.log('Feedback Final:', feedback)} />
           <button onClick={resetSession} className="btn-secondary" style={{ marginTop: 20 }}>
             Nova Sessão
@@ -375,8 +421,34 @@ export default function App() {
             {currentQuestion || (isProcessing ? 'A preparar...' : '')}
           </h2>
 
+          {/* ── CHIPS EXTENSION CHECK (Governance) ── */}
+          {phase === 'EXTENSION_CHECK' && (
+            <div style={{ marginTop: 32, display: 'flex', gap: '10px', justifyContent: mode === 'conversation' ? 'center' : 'flex-start' }}>
+              <button
+                disabled={isProcessing}
+                onClick={() => {
+                   updateState({ governance: { ...state.governance, permissionToExtend: 'yes', extensionAccepted: true, extensionCount: state.governance.extensionCount + 1 }});
+                   handleUserSubmit('substantive', 'Podes continuar com a pergunta extra.');
+                }}
+                className="btn-primary"
+              >
+                Tolerar pergunta extra
+              </button>
+              <button
+                disabled={isProcessing}
+                onClick={() => {
+                   updateState({ governance: { ...state.governance, permissionToExtend: 'no', extensionAccepted: false }});
+                   handleUserSubmit('substantive', 'Prefiro que avances já.');
+                }}
+                className="btn-secondary"
+              >
+                Concluir já com o que tens
+              </button>
+            </div>
+          )}
+
           {/* ── CHIPS (fases FIELD / NATURE / FUNCTION / COST) ── */}
-          {isChipPhase && (
+          {isChipPhase && phase !== 'EXTENSION_CHECK' && (
             <div style={{ marginTop: 32 }}>
               <div style={{ display: 'flex', flexWrap: 'wrap', gap: '10px', justifyContent: mode === 'conversation' ? 'center' : 'flex-start' }}>
                 {activeChips.map(chip => (
