@@ -14,6 +14,7 @@ import type { TriageState } from '../types/internalState';
 import { evaluateGovernanceNextStep } from '../engine/governanceEngine';
 import { GOVERNANCE_TEMPLATES } from '../engine/governanceTemplates';
 import { buildLatentAndGuidanceDeterministic } from '../engine/latentGuidanceEngine';
+import { decideContinuationMode } from '../engine/continuation/continuationEngine';
 import './index.css';
 
 // ─── Chip Maps por fase ───────────────────────────────────────────────────────
@@ -145,7 +146,7 @@ export default function App() {
       
       if (govDecision.action === 'close_now') {
          updateState({ 
-            phase: 'CLOSE',
+            phase: 'LATENT_READING_DISPLAY',
             governance: { ...state.governance, shouldCloseNow: true, lastGovernanceReason: govDecision.reason }
          });
          setCurrentQuestion(
@@ -348,33 +349,107 @@ export default function App() {
     );
   }
 
-  // ─── Render: CLOSE ────────────────────────────────────────────────────────────
-  if (phase === 'CLOSE') {
+  // ─── Render: LATENT_READING_DISPLAY (Primeira Leitura) ──────────────────────
+  if (phase === 'LATENT_READING_DISPLAY' || phase === 'CLOSE') {
     const motorOutput = buildLatentAndGuidanceDeterministic(state);
 
     return (
       <div className="container" style={{ padding: '0 2rem' }}>
         <div className="splash" style={{ maxWidth: 640 }}>
-          <h1 style={{ marginBottom: '1.5rem', fontSize: '1.4rem' }}>Leitura e Próximo Passo</h1>
+          <h1 style={{ marginBottom: '1.5rem', fontSize: '1.4rem' }}>Leitura Inicial</h1>
           
           <div style={{ textAlign: 'left', background: 'var(--accent-base)', border: '1px solid var(--border-color)', borderRadius: 12, padding: 24, fontSize: '0.95rem', lineHeight: 1.7, color: 'var(--text-main)', marginBottom: 24 }}>
             <p style={{ margin: '0 0 16px 0', color: 'var(--text-muted)' }}>
               {motorOutput.latentParagraph}
             </p>
-            <p style={{ margin: '0 0 16px 0', color: 'var(--text-muted)' }}>
-              {motorOutput.guidanceParagraph}
-            </p>
-            <p style={{ margin: 0, fontWeight: 500, color: 'var(--text-main)' }}>
-              {motorOutput.closingLine}
-            </p>
           </div>
 
-          <PostSessionFeedback onComplete={(feedback) => console.log('Feedback Final:', feedback)} />
-          <button onClick={resetSession} className="btn-secondary" style={{ marginTop: 20 }}>
-            Nova Sessão
+          <button 
+            className="btn-primary" 
+            style={{ marginTop: 20 }}
+            onClick={() => {
+              const contState = decideContinuationMode(state);
+              updateState({ phase: 'CONTINUATION_ACTIVE', continuationState: contState });
+            }}
+          >
+            Próximo Passo
           </button>
         </div>
         {!import.meta.env.PROD && <DebugPanel />}
+      </div>
+    );
+  }
+
+  // ─── Render: CONTINUATION_ACTIVE (Motor Dirigido V1) ────────────────────────
+  if (phase === 'CONTINUATION_ACTIVE') {
+    const p = state.continuationState?.outputPayload;
+    if (!p) return null;
+
+    return (
+      <div className="container" style={{ padding: '0 2rem' }}>
+        <div className="splash" style={{ maxWidth: 640 }}>
+          <h1 style={{ marginBottom: '1.5rem', fontSize: '1.4rem' }}>{p.title}</h1>
+          
+          <div style={{ textAlign: 'left', background: 'var(--bg-card)', border: '1px solid var(--border-color)', borderRadius: 12, padding: 24, fontSize: '0.95rem', lineHeight: 1.7, color: 'var(--text-main)', marginBottom: 24 }}>
+            <p style={{ margin: '0 0 16px 0' }}>{p.mainText}</p>
+            
+            {p.optionalPrompt && (
+              <p style={{ margin: '16px 0 0 0', fontWeight: 500, color: 'var(--accent-text)' }}>
+                {p.optionalPrompt}
+              </p>
+            )}
+
+            {p.closingText && (
+              <p style={{ margin: '16px 0 0 0', fontWeight: 500 }}>{p.closingText}</p>
+            )}
+          </div>
+
+          {/* Se pedir resposta (Modos Refine ou Test), mostra input curto e fecha a seguir */}
+          {p.optionalPrompt && (
+            <div style={{ display: 'flex', flexDirection: 'column', gap: 12, marginBottom: 24 }}>
+              <input 
+                type="text"
+                placeholder="Resposta curta..."
+                className="pulse-input"
+                style={{ width: '100%', padding: '12px', borderRadius: 8, border: '1px solid var(--border-color)', background: 'transparent', color: '#fff' }}
+                onKeyDown={(e) => {
+                  if (e.key === 'Enter' && e.currentTarget.value.trim()) {
+                    // Após 1 turno, forcamos a submissão nula para CLOSE_NOW
+                    updateState({ phase: 'CLOSE_NOW' });
+                  }
+                }}
+              />
+              <span style={{ fontSize: '0.8rem', color: 'var(--text-muted)' }}>Pressiona Enter para confirmar e concluir.</span>
+            </div>
+          )}
+
+          {/* Se for Terminal (Work_from_reading ou Close_now), botão de fechar */}
+          {!p.optionalPrompt && (
+            <>
+              <PostSessionFeedback onComplete={(feedback) => console.log('Feedback Final:', feedback)} />
+              <button onClick={resetSession} className="btn-secondary" style={{ marginTop: 20 }}>
+                Nova Sessão
+              </button>
+            </>
+          )}
+
+        </div>
+        {!import.meta.env.PROD && <DebugPanel />}
+      </div>
+    );
+  }
+
+  // ─── Render: CLOSE_NOW (Hard Terminal Fallback) ──────────────────────────────
+  if (phase === 'CLOSE_NOW') {
+    return (
+      <div className="container" style={{ padding: '0 2rem' }}>
+        <div className="splash" style={{ maxWidth: 640 }}>
+          <h1 style={{ marginBottom: '1.5rem', fontSize: '1.4rem' }}>Resumo Final</h1>
+          <div style={{ textAlign: 'left', background: 'var(--accent-base)', borderRadius: 12, padding: 24, fontSize: '0.95rem', color: 'var(--text-muted)' }}>
+             O teu ponto de reflexão e a distinção cirúrgica ficaram retidos no turno anterior. Vai validar isto fisicamente nestas próximas 48 horas.
+          </div>
+          <button onClick={resetSession} className="btn-secondary" style={{ marginTop: 32 }}>Nova Sessão</button>
+        </div>
       </div>
     );
   }

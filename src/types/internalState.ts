@@ -15,7 +15,10 @@ export type InternalStatePhase =
   | 'FOLLOWUP_RESUME'
   | 'CONTINUATION_MODE_SELECT'
   | 'CONTINUED_CLARIFICATION'
-  | 'CONTINUED_GUIDANCE';
+  | 'CONTINUED_GUIDANCE'
+  | 'LATENT_READING_DISPLAY'
+  | 'CONTINUATION_ACTIVE'
+  | 'CLOSE_NOW';
 
 // ─── Triage Types ─────────────────────────────────────────────────────────────
 
@@ -90,6 +93,29 @@ export interface GovernanceState {
   lastGovernanceReason: string | null;
 }
 
+// ─── Post-Triage Continuation ──────────────────────────────────────────────────
+
+export type ContinuationMode = 'refine_understanding' | 'test_hypothesis' | 'work_from_reading' | 'close_now';
+
+export interface ContinuationOutput {
+  title: string;
+  mainText: string;
+  optionalPrompt?: string;
+  closingText?: string;
+}
+
+export interface ContinuationState {
+  mode: ContinuationMode | null;
+  reason: string | null;
+  expectedValue: string | null;
+  maxTurnsInMode: number;
+  turnsUsedInMode: number;
+  continuationResolved: boolean;
+  failureFlags: string[];
+  shouldCloseAfterThisTurn: boolean;
+  outputPayload?: ContinuationOutput;
+}
+
 export interface CaseStructure {
   caseField: string | null;
   surfaceTheme: string | null;
@@ -146,6 +172,8 @@ export interface InternalState {
 
   /** Triage output — null until triage is completed */
   triageState: TriageState | null;
+
+  continuationState: ContinuationState;
 
   // Memória operacional mínima para manter retrocompatibilidade / histórico
   askedQuestionIds: string[];

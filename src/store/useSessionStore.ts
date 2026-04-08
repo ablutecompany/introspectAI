@@ -21,6 +21,18 @@ const buildInitialState = (): Omit<InternalState, 'schemaVersion' | 'appVersion'
   const time = now();
   return {
     triageState: null,
+    
+    continuationState: {
+      mode: null,
+      reason: null,
+      expectedValue: null,
+      maxTurnsInMode: 0,
+      turnsUsedInMode: 0,
+      continuationResolved: false,
+      failureFlags: [],
+      shouldCloseAfterThisTurn: false
+    },
+
     mode: 'conversation',
     phase: 'TRIAGE',
     
