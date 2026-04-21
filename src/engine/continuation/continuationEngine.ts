@@ -1,4 +1,5 @@
 import type { InternalState, ContinuationState, ContinuationMode } from '../../../types/internalState';
+import { buildLatentAndGuidanceDeterministic } from '../../latentGuidanceEngine';
 import { 
   hasRealCompetingHypotheses, 
   doesAmbiguityChangeAction, 
@@ -17,37 +18,50 @@ import {
 /**
  * Motor determinístico que herda tudo da triagem e da primeira leitura
  * e decide formal e inviolavelmente o que a app faz a partir daqui.
+ * 
+ * Sprint 2: Usa sinais de CaseMemory (confidenceState, competingHypothesis)
+ * e o flag needsDiscrimination do motor latente para tomar decisões mais
+ * honestas — sem fechar prematuramente com maturidade falsa.
  */
 export function decideContinuationMode(state: InternalState): ContinuationState {
   
-  // Condições Stop-Loss Hardcoded (Early Close)
+  // Stop-Loss de Governança (hard gate — sempre primeiro)
   if (state.governance.shouldCloseNow) {
     return buildState('close_now', 'Governance acionou Early Close (Meta/Fadiga).', 'Término higiénico antes que surja ruído.', 0, state);
   }
 
-  // Tolerância baixa ou chance alta de Loop Repetitivo
+  // Tolerância baixa ou risco de loop repetitivo
   if (state.governance.userToleranceLevel === 'low' || isContinuationLikelyToRepeat(state) || shouldCloseByLowMarginalValue(state)) {
     return buildState('close_now', 'Ganho marginal demasiado baixo ou limite de tolerância atingido.', 'Evitar saturação e deixar o user processar o output off-app.', 0, state);
   }
 
-  // Refinar Compreensão
-  if (hasRealCompetingHypotheses(state) && doesAmbiguityChangeAction(state)) {
-    return buildState('refine_understanding', 'Existem 2 hipóteses rivais e a tática correta exige distinção prévia.', 'Separar causa mecânica da causa percetual.', 1, state);
+  // Sprint 2: Sinal de discriminação do motor latente
+  // Se o motor calculou que há ambiguidade real (foco difuso ou area místa), 
+  // calcular o output do motor para obter o flag needsDiscrimination
+  const motorOutput = buildLatentAndGuidanceDeterministic(state);
+  const needsDiscrimination = motorOutput.needsDiscrimination;
+
+  // Sprint 2: Hipótese competidora registada na CaseMemory também serve de sinal
+  const hasCompetingHypothesisInMemory = !!state.caseMemory?.competingHypothesis;
+
+  // Refinar Compreensão (via heurística clássica OU sinal de discriminação do motor)
+  if ((hasRealCompetingHypotheses(state) && doesAmbiguityChangeAction(state)) || 
+      (needsDiscrimination && hasCompetingHypothesisInMemory)) {
+    return buildState('refine_understanding', 'Existem hipóteses rivais ou foco difuso — discriminação necessária antes de fechar.', 'Separar causa mecânica da causa percetual.', 1, state);
   }
 
-  // Testar Hipótese
+  // Testar Hipótese (detalhe difuso sem competição clara — testar ancoção)
   if (hasStrongButUntestedHypothesis(state)) {
     return buildState('test_hypothesis', 'Informação base difusa forçou a app a prever um modelo que requer selo empírico do user.', 'Correção célere sem destruir o progresso feito.', 1, state);
   }
 
-  // Trabalhar a Partir da Leitura
+  // Trabalhar a Partir da Leitura (hipótese suficientemente sólida)
   if (isReadingGoodEnoughToWork(state)) {
-    // Mode `work_from_reading` é basicamente o fim da fase de conversão e a entrega da ferramenta, terminando num output final (o max turns é 0 para impedir respingueis).
     return buildState('work_from_reading', 'Hipótese ancorada e específica, útil o suficiente para isolar a fricção material.', 'Passagem ao micro-passo visível sem voltar a sondar.', 0, state);
   }
 
-  // Fallback (Regra de Ouro: na dúvida de valor novo e sólido, Fechar)
-  return buildState('close_now', 'Ausência clara de caminho estrito de refinanciamento tático.', 'Sair pelo topo, retendo o valor da leitura original.', 0, state);
+  // Fallback honesto: na dúvida, fechar sem fingir maturidade
+  return buildState('close_now', 'Ausência clara de caminho estrito de refinamento tático.', 'Sair pelo topo, retendo o valor da hipótese provisória.', 0, state);
 }
 
 /** Utility internal builder */

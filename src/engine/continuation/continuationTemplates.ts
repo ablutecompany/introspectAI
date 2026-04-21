@@ -1,4 +1,5 @@
 import type { FrictionArea, InternalState } from '../../../types/internalState';
+import { buildDiscriminationQuestion } from '../../session/discriminationEngine';
 
 const AREA_LABELS: Record<FrictionArea, string> = {
   A: 'corpo e sintomatologia', B: 'exaustão real e energia', C: 'ativação mental e ansiedade',
@@ -9,8 +10,23 @@ export function getRefineUnderstandingOutput(state: InternalState) {
   const area1 = state.triageState?.primary_problem_area ?? 'C';
   const area2 = state.triageState?.secondary_problem_area ?? 'B';
   const label1 = AREA_LABELS[area1 as FrictionArea];
-  const label2 = AREA_LABELS[area2 as FrictionArea];
+  const label2 = AREA_LABELS[(area2 ?? 'B') as FrictionArea];
 
+  // Sprint 3: usar o motor de discriminação para gerar a pergunta real
+  const discriminationQ = buildDiscriminationQuestion(state);
+
+  if (discriminationQ) {
+    return {
+      title: 'Afinar o Foco',
+      mainText: discriminationQ.contextText,
+      optionalPrompt: discriminationQ.questionText,
+      // Guardar no output para que App.tsx saiba o intentTag desta pergunta
+      // e possa registar a resposta correctamente
+      _discriminationIntentTag: discriminationQ.intentTag,
+    };
+  }
+
+  // Fallback genérico se o motor não devolver pergunta (não deverá ocorrer neste modo)
   return {
     title: 'Precisamos de afinar',
     mainText: `Vejo aqui um nó apertado. A triagem levanta duas hipóteses fortes simultâneas: pode ser uma quebra por ${label1}, ou pode estar a nascer de uma pura colisão em ${label2}. Mas a forma como vamos atacar cada um é oposta.`,

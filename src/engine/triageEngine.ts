@@ -3,6 +3,7 @@ import type {
   ImmediateGoal,
   TriageState,
   DetailLevel,
+  CaseMemory
 } from '../types/internalState';
 import type { CaseStructure } from '../types/internalState';
 
@@ -231,4 +232,37 @@ export function mapTriageToCaseStructure(triage: TriageState): Partial<CaseStruc
 // ─── Detail Level Detector ───────────────────────────────────────────────────
 export function resolveDetailLevel(subtype: string | null): DetailLevel {
   return isDiffuseSubtype(subtype) || subtype === null ? 'reserved_diffuse' : 'specific';
+}
+
+// ─── CaseMemory Inference ─────────────────────────────────────────────────────
+
+export function inferCaseMemoryFromTriage(triage: TriageState): Partial<CaseMemory> {
+  const currentFocus = AREA_LABELS[triage.primary_problem_area] || null;
+  
+  const hotLeads: string[] = [];
+  if (triage.primary_problem_subtype && !isDiffuseSubtype(triage.primary_problem_subtype)) {
+    const found = SUBTYPE_QUESTIONS[triage.primary_problem_area]?.options.find(
+      (o) => o.id === triage.primary_problem_subtype
+    );
+    if (found) hotLeads.push(`Sintoma raiz apontado: ${found.label}`);
+  }
+  
+  if (triage.immediate_goal) {
+    hotLeads.push(`Objetivo imediato: ${GOAL_LABELS[triage.immediate_goal]}`);
+  }
+
+  let competingHypothesis: string | null = null;
+  if (triage.secondary_problem_area) {
+     competingHypothesis = `Ponderar eixo secundário (conflito/tensão mista): ${AREA_LABELS[triage.secondary_problem_area]}`;
+  }
+
+  const provisionalHypothesis = `A fricção principal aparenta derivar de uma disrupção em: ${currentFocus}.`;
+
+  return {
+    currentFocus,
+    hotLeads,
+    provisionalHypothesis,
+    competingHypothesis,
+    confidenceState: triage.detail_level === 'specific' ? 'moderate' : 'insufficient'
+  };
 }

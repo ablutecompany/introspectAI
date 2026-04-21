@@ -13,9 +13,11 @@ const AREA_LABELS: Record<FrictionArea, string> = {
 };
 
 export interface MotorOutput {
-  latentParagraph: string;
+  provisionalFocusLabel: string;
+  provisionalHypothesisParagraph: string;
   guidanceParagraph: string;
   closingLine: string;
+  needsDiscrimination: boolean;
 }
 
 export function buildLatentAndGuidanceDeterministic(state: InternalState): MotorOutput {
@@ -43,9 +45,13 @@ export function buildLatentAndGuidanceDeterministic(state: InternalState): Motor
   const guidance = buildGuidanceText(mode, guidanceData, goalModulator);
   const fecho = buildClosingLine();
 
+  const needsDiscrimination = !!secArea || isDiffuse;
+
   return {
-    latentParagraph: latent,
+    provisionalFocusLabel: surfaceLabel,
+    provisionalHypothesisParagraph: latent,
     guidanceParagraph: guidance,
-    closingLine: fecho
+    closingLine: fecho,
+    needsDiscrimination
   };
 }

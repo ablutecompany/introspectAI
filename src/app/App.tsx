@@ -4,11 +4,16 @@ import { useVoiceController } from '../features/voice/useVoiceController';
 import { TriageFlow } from '../features/triage/TriageFlow';
 import { buildLatentAndGuidanceDeterministic } from '../engine/latentGuidanceEngine';
 import { decideContinuationMode } from '../engine/continuation/continuationEngine';
+import { inferSessionStageFromLegacyPhase } from '../engine/session/phaseCompatibility';
+import { buildDiscriminationQuestion, interpretDiscriminationAnswer } from '../engine/session/discriminationEngine';
+import { buildEmergentReading, inferReadingStageFromMemory } from '../engine/emergentReadingEngine';
 import type { TriageState } from '../types/internalState';
 import './index.css';
 
 export default function App() {
   const { phase, triageState, continuationState, updateState, setTriageState } = useSessionStore();
+  const updateCaseMemory = useSessionStore((s) => s.updateCaseMemory);
+  const setSessionStage = useSessionStore((s) => s.setSessionStage);
   const { 
     voiceState, 
     speakLine, 
@@ -70,33 +75,77 @@ export default function App() {
     );
   }
 
-  // ─── Render: LATENT READING DISPLAY ──────────────────────────────────────────
+  // ─── Render: READING (Provisória ou Emergente) ──────────────────────────────
   if (phase === 'LATENT_READING_DISPLAY') {
     if (!triageState) return null;
-    const motorOutput = buildLatentAndGuidanceDeterministic(useSessionStore.getState());
+    const currentState = useSessionStore.getState();
+
+    // Sprint 4: Tentar gerar leitura emergente se o caso tiver maturidade
+    const emergentOutput = buildEmergentReading(currentState);
+    const motorOutput = emergentOutput ? null : buildLatentAndGuidanceDeterministic(currentState);
     
     const handleProceed = () => {
       stopSpeaking();
       const state = useSessionStore.getState();
+      // Sprint 4: Sincronizar sessionStage com a maturidade real do caso
+      const correctStage = inferReadingStageFromMemory(state.caseMemory);
       const contState = decideContinuationMode(state);
-      updateState({ phase: 'CONTINUATION_ACTIVE', continuationState: contState });
+      
+      updateState({ 
+         phase: 'CONTINUATION_ACTIVE', 
+         sessionStage: correctStage,
+         continuationState: contState 
+      });
     };
 
+    // ─── Render: LEITURA EMERGENTE (com maturidade) ──────────────────────────
+    if (emergentOutput) {
+      return (
+        <div style={{ minHeight: '100vh', background: 'var(--bg-color)', position: 'relative' }}>
+          {renderVoiceToggle()}
+          <div className="container" style={{ padding: '0 2rem' }}>
+            <div className="splash" style={{ maxWidth: 640 }}>
+              <h1 style={{ marginBottom: '1.5rem', fontSize: '1.4rem' }}>{emergentOutput.title}</h1>
+              
+              <div style={{ textAlign: 'left', background: 'var(--bg-card)', border: '1px solid var(--border-color)', borderRadius: 12, padding: 24, fontSize: '0.95rem', lineHeight: 1.7, color: 'var(--text-main)', marginBottom: 24 }}>
+                <p style={{ margin: '0 0 20px 0' }}>
+                  {emergentOutput.readingParagraph}
+                </p>
+                <p style={{ margin: 0, fontSize: '0.9rem', color: 'var(--text-muted)', borderTop: '1px solid var(--border-color)', paddingTop: 16 }}>
+                  {emergentOutput.lightGuidance}
+                </p>
+              </div>
+
+              <button className="btn-primary" style={{ marginTop: 20 }} onClick={handleProceed}>
+                Continuar
+              </button>
+            </div>
+          </div>
+        </div>
+      );
+    }
+
+    // ─── Render: HIPÓTESE PROVISÓRIA (sem maturidade suficiente ainda) ────────
     return (
       <div style={{ minHeight: '100vh', background: 'var(--bg-color)', position: 'relative' }}>
         {renderVoiceToggle()}
         <div className="container" style={{ padding: '0 2rem' }}>
           <div className="splash" style={{ maxWidth: 640 }}>
-            <h1 style={{ marginBottom: '1.5rem', fontSize: '1.4rem' }}>Leitura Latente</h1>
+            <h1 style={{ marginBottom: '1.5rem', fontSize: '1.4rem' }}>Hipótese Provisória</h1>
             
             <div style={{ textAlign: 'left', background: 'var(--accent-base)', border: '1px solid var(--border-color)', borderRadius: 12, padding: 24, fontSize: '0.95rem', lineHeight: 1.7, color: 'var(--text-main)', marginBottom: 24 }}>
               <p style={{ margin: '0 0 16px 0', color: 'var(--text-muted)' }}>
-                {motorOutput.latentParagraph}
+                {motorOutput?.provisionalHypothesisParagraph}
               </p>
+              {motorOutput?.needsDiscrimination && (
+                 <div style={{ marginTop: 12, paddingTop: 12, borderTop: '1px dashed rgba(255,255,255,0.2)', fontSize: '0.85rem', color: 'var(--text-muted)' }}>
+                    <em>Nota: Foco partilhado ou difuso. Será útil discriminar a causa raiz de seguida.</em>
+                 </div>
+              )}
             </div>
 
             <button className="btn-primary" style={{ marginTop: 20 }} onClick={handleProceed}>
-              Descobrir Padrão de Fricção
+              Explorar Padrão de Fricção
             </button>
           </div>
         </div>
@@ -118,9 +167,27 @@ export default function App() {
        stopSpeaking();
        
        setTimeout(() => {
-          // Marcar o uso como 1 turno máximo
           let reasonText = 'Sessão concluída após input.';
           if (shortcutMode === 'refute') reasonText = 'Sessão encerrada (hipótese descartada pelo utilizador).';
+
+          // Sprint 3: Registar a resposta discriminadora antes do fecho
+          // Se esta fase tinha uma pergunta com intentTag, interpretar a resposta
+          const currentState = useSessionStore.getState();
+          const intentTag = continuationState?.outputPayload?._discriminationIntentTag;
+          if (intentTag && currentState.triageState) {
+            const discriminationQ = buildDiscriminationQuestion(currentState);
+            if (discriminationQ && discriminationQ.intentTag === intentTag) {
+              const rawAnswer = shortcutMode === 'refute'
+                ? '' // refutação explícita = sem confirmação
+                : (inputText.trim() || transcript.trim());
+              const memoryUpdate = interpretDiscriminationAnswer(currentState, discriminationQ, rawAnswer);
+              updateCaseMemory(memoryUpdate);
+              // Actualizar sessionStage para DISCRIMINATIVE_EXPLORATION quando registamos discriminação
+              if (!useSessionStore.getState().caseMemory.discriminationRecord?.length) {
+                setSessionStage('DISCRIMINATIVE_EXPLORATION');
+              }
+            }
+          }
 
           const forceCloseState = decideContinuationMode({
              ...useSessionStore.getState(),
@@ -132,7 +199,12 @@ export default function App() {
              }
           });
           
-          updateState({ phase: 'CLOSE_NOW', continuationState: forceCloseState });
+          updateState({ 
+             phase: 'CLOSE_NOW', 
+             sessionStage: inferSessionStageFromLegacyPhase('CLOSE_NOW'),
+             continuationState: forceCloseState 
+          });
+          
           setInputText('');
           setIsProcessing(false);
        }, 500);

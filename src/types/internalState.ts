@@ -4,6 +4,54 @@ export type InternalStatePhase =
   | 'CONTINUATION_ACTIVE'
   | 'CLOSE_NOW';
 
+// ─── Longitudinal Architecture ──────────────────────────────────────────────────
+
+export type SessionStage = 
+  | 'ENTRY_ORIENTATION'
+  | 'PROVISIONAL_FOCUS'
+  | 'DISCRIMINATIVE_EXPLORATION'
+  | 'EMERGENT_READING'
+  | 'WORK_ASSIGNMENT'
+  | 'FOLLOW_UP_REENTRY'
+  | 'CLOSE_NOW';
+
+export interface CaseMemory {
+  currentFocus: string | null;
+  provisionalHypothesis: string | null;
+  competingHypothesis: string | null;
+  hiddenFunctionCandidate: string | null;
+  invisibleCostCandidate: string | null;
+  maintenanceErrorCandidate: string | null;
+  hotLeads: string[];
+  userIdiolect: string[];
+  assignedWork: string | null;
+  progressSignals: string[];
+  confidenceState: 'insufficient' | 'moderate' | 'strong';
+  followUpMeta: {
+    lastSessionDate: number | null;
+    pendingWorkAssigned: boolean;
+  };
+
+  // ─── Sprint 3: Registo de Discriminação ──────────────────────────────────────────
+  // Guarda o histórico de perguntas discriminadoras feitas ao utilizador
+  // para evitar repetição disfarada e actualizar confiança com base nas respostas.
+  discriminationRecord: DiscriminationEntry[];
+}
+
+/** Uma única interacção de pergunta discriminadora, imutável após registo. */
+export interface DiscriminationEntry {
+  /** Tag de intenção: o que a pergunta tentava separar (ex: 'primary_vs_competing', 'relief_vs_control') */
+  intentTag: string;
+  /** A pergunta exacta apresentada ao utilizador */
+  question: string;
+  /** A resposta textual do utilizador (pode ser vazia se ignorou) */
+  answer: string;
+  /** O motor interpretou a resposta como confirmação da hipótese principal? */
+  confirmedPrimary: boolean | null;
+  /** Campo candidato que emergiu da discriminação (ex: 'hiddenFunctionCandidate') */
+  emergentCandidate: string | null;
+}
+
 // ─── Triage Types ─────────────────────────────────────────────────────────────
 
 /** The 6 primary friction areas + G (mixed) */
@@ -86,6 +134,9 @@ export interface ContinuationOutput {
   mainText: string;
   optionalPrompt?: string;
   closingText?: string;
+  /** Sprint 3: Tag de intenção da pergunta discriminadora (se aplicável)
+   *  Usado pelo App.tsx para associar a resposta ao registo correcto no CaseMemory. */
+  _discriminationIntentTag?: string;
 }
 
 export interface ContinuationState {
@@ -121,10 +172,12 @@ export interface InternalState {
   appVersion: string;
   mode: 'conversation' | 'writing';
   phase: InternalStatePhase;
+  sessionStage: SessionStage;
 
   sessionMeta: SessionMeta;
   governance: GovernanceState;
   triageState: TriageState | null;
   continuationState: ContinuationState;
   voiceState: VoiceState;
+  caseMemory: CaseMemory;
 }
