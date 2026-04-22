@@ -94,33 +94,48 @@ function buildComponents(state: InternalState): EmergentReadingComponents {
   const leadAnchor = memory.hotLeads[0] ?? null;
 
   // ─── Componente 1: Framing ─────────────────────────────────────────────────
-  // Usa hiddenFunction se disponível; senso contrário usa base da área
   let framing: string;
-  if (dominantFunction) {
+  const focusRef = memory.currentFocus ?? dominantFunction ?? latentData.base;
+  
+  if (memory.lastCorrectionSignal) {
+    // Integração de sinal de correção passado
+    framing = `Uma coisa ficou clara na nossa exploração: a explicação mais óbvia não servia. O foco ajustou-se para ${focusRef}, e é aí que a pressão parece estar a acumular.`;
+  } else if (dominantFunction) {
     framing = `Algo que se impõe aqui: a pressão central não está no problema em si, mas em ${dominantFunction}.`;
   } else {
     framing = `O padrão que começa a emergir aponta para ${latentData.base}.`;
   }
 
-  // Especificar com hot lead se existir
-  if (leadAnchor) {
+  // Sprint 10D: Usar fragmento orgânico do utilizador ou lead
+  const userFragment = memory.userPhrasingFragments?.[memory.userPhrasingFragments.length - 1];
+  if (userFragment) {
+    framing += ` Como referiste, tem muito a ver com "${userFragment}".`;
+  } else if (leadAnchor) {
     framing += ` O sinal mais claro: ${leadAnchor.toLowerCase().replace(/^sintoma raiz apontado: /, '').replace(/^objetivo imediato: /, '')}.`;
   }
 
   // ─── Componente 2: Função ──────────────────────────────────────────────────
-  // O que o padrão está a cumprir / sustentar
+  const salientTerm = memory.salientTerms?.[memory.salientTerms.length - 1];
   let functionText: string;
+  
   if (dominantFunction) {
-    functionText = `Isto serve algo — mesmo que não intencionalmente. O ciclo actual parece estar a dar ${dominantFunction}, pelo menos de forma transitória.`;
+    functionText = `Isto serve algo — mesmo que não intencionalmente. O ciclo atual parece estar a dar ${dominantFunction}, pelo menos de forma transitória.`;
+  } else if (salientTerm) {
+    functionText = `A tensão que se instalou parece cumprir uma função: a sensação de ${salientTerm} prende a atenção e adia ter de lidar com ${latentData.tension[1]}.`;
   } else {
     functionText = `A tensão que se instalou parece cumprir uma função: manter a atenção fixada em ${latentData.tension[0]}, o que adia ter de lidar com ${latentData.tension[1]}.`;
   }
 
   // ─── Componente 3: Tensão ──────────────────────────────────────────────────
-  const tension = `O paradoxo real: ${latentData.tension[0]} e ${latentData.tension[1]} puxam em sentidos opostos. Não se pode satisfazer os dois ao mesmo tempo, e essa impossibilidade é onde a maior parte da energia se perde.`;
+  let tension = `O paradoxo real: ${latentData.tension[0]} e ${latentData.tension[1]} puxam em sentidos opostos. Não se pode satisfazer os dois ao mesmo tempo, e essa impossibilidade é onde a maior parte da energia se perde.`;
+  
+  // Sprint 10D: Ancorar tensão na hipótese se for diferente do foco e função
+  if (memory.provisionalHypothesis && memory.provisionalHypothesis !== focusRef && memory.provisionalHypothesis !== dominantFunction) {
+    tension = `O paradoxo real: sente-se ${memory.provisionalHypothesis}, mas por baixo ${latentData.tension[1]} continua a puxar no sentido oposto. Não se resolve os dois ao mesmo tempo, e é aí que a energia se perde.`;
+  }
 
   // ─── Componente 4: Custo ──────────────────────────────────────────────────
-  const cost = `O preço que isto tem é que ${latentData.cost}. Não é inevitável, mas enquanto não for nomeado, mantém-se activo por baixo.`;
+  const cost = `O preço que isto tem é que ${latentData.cost}. Não é inevitável, mas enquanto não for nomeado, mantém-se ativo por baixo.`;
 
   return { framing, function: functionText, tension, cost };
 }
@@ -136,9 +151,12 @@ function isSpecificEnough(memory: CaseMemory): boolean {
   const hasAnchoredFunction = !!memory.hiddenFunctionCandidate
     || (memory.discriminationRecord ?? []).some((e) => !!e.emergentCandidate);
   const hasHotLeads = memory.hotLeads.length > 0;
+  
+  // Sprint 10D: Também conta como ancorado/específico se houver idioleto ou fragmento extraído do utilizador
+  const hasUserPhrasing = (memory.userPhrasingFragments?.length ?? 0) > 0 || (memory.salientTerms?.length ?? 0) > 0;
 
-  // Pelo menos um dos dois tem de estar presente
-  return hasAnchoredFunction || hasHotLeads;
+  // Pelo menos um elemento de especificidade tem de estar presente
+  return hasAnchoredFunction || hasHotLeads || hasUserPhrasing;
 }
 
 // ─── Output público ────────────────────────────────────────────────────────────
