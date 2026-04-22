@@ -14,7 +14,7 @@
  */
 
 import type { InternalState, CaseMemory, DiscriminationEntry, FrictionArea } from '../../types/internalState';
-import { MAPA_LATENTE } from '../latentGuidanceTemplates';
+import { MAPA_LATENTE } from './latentGuidanceTemplates';
 
 // ─── Gate de Maturidade ────────────────────────────────────────────────────────
 

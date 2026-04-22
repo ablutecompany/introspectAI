@@ -2,6 +2,8 @@ import { useState, useEffect } from 'react';
 import { useSessionStore } from '../store/useSessionStore';
 import { useVoiceController } from '../features/voice/useVoiceController';
 import { TriageFlow } from '../features/triage/TriageFlow';
+import { ReentryGate } from '../features/session/ReentryGate';
+import { FollowUpFlow } from '../features/session/FollowUpFlow';
 import { buildLatentAndGuidanceDeterministic } from '../engine/latentGuidanceEngine';
 import { decideContinuationMode } from '../engine/continuation/continuationEngine';
 import { inferSessionStageFromLegacyPhase } from '../engine/session/phaseCompatibility';
@@ -11,9 +13,13 @@ import type { TriageState } from '../types/internalState';
 import './index.css';
 
 export default function App() {
-  const { phase, triageState, continuationState, updateState, setTriageState } = useSessionStore();
+  const { phase, sessionStage, triageState, continuationState, updateState, setTriageState } = useSessionStore();
   const updateCaseMemory = useSessionStore((s) => s.updateCaseMemory);
   const setSessionStage = useSessionStore((s) => s.setSessionStage);
+  const continueExistingCase = useSessionStore((s) => s.continueExistingCase);
+  const resumeAvailable = useSessionStore((s) => s.sessionMeta.resumeAvailable);
+  // Sprint 6: ligar markMeaningfulInteraction nos inputs reais de CONTINUATION_ACTIVE
+  const markMeaningfulInteraction = useSessionStore((s) => s.markMeaningfulInteraction);
   const { 
     voiceState, 
     speakLine, 
@@ -60,7 +66,35 @@ export default function App() {
     )
   );
 
-  // ─── Render: TRIAGE ──────────────────────────────────────────────────────────
+  // ─── Render: REENTRADA (caso retomável no mesmo browser) ────────────────────
+  // Mostrado antes da triagem, se existir caso válido persistido.
+  if (phase === 'TRIAGE' && resumeAvailable) {
+    return (
+      <div style={{ minHeight: '100vh', background: 'var(--bg-color)', position: 'relative' }}>
+        {renderVoiceToggle()}
+        <ReentryGate
+          onContinue={() => {
+            continueExistingCase();
+          }}
+          onStartFresh={() => {
+            useSessionStore.getState().resetSession();
+          }}
+        />
+      </div>
+    );
+  }
+
+  // ─── Render: FOLLOW_UP_REENTRY (reentrada real — não volta à triagem) ────────
+  if (sessionStage === 'FOLLOW_UP_REENTRY') {
+    return (
+      <div style={{ minHeight: '100vh', background: 'var(--bg-color)', position: 'relative' }}>
+        {renderVoiceToggle()}
+        <FollowUpFlow />
+      </div>
+    );
+  }
+
+  // ─── Render: TRIAGE (nova exploração) ────────────────────────────────────────
   if (phase === 'TRIAGE') {
     const handleTriageComplete = (triage: TriageState) => {
       setTriageState(triage);
@@ -182,11 +216,21 @@ export default function App() {
                 : (inputText.trim() || transcript.trim());
               const memoryUpdate = interpretDiscriminationAnswer(currentState, discriminationQ, rawAnswer);
               updateCaseMemory(memoryUpdate);
+              // Sprint 6: marcar interação significativa quando há resposta discriminadora real
+              if (rawAnswer && shortcutMode !== 'refute') {
+                markMeaningfulInteraction();
+              }
               // Actualizar sessionStage para DISCRIMINATIVE_EXPLORATION quando registamos discriminação
               if (!useSessionStore.getState().caseMemory.discriminationRecord?.length) {
                 setSessionStage('DISCRIMINATIVE_EXPLORATION');
               }
             }
+          }
+
+          // Sprint 6: marcar interação significativa quando o utilizador submeteu resposta real
+          // (não em cancel/refute — esses são encerramento, não material clínico)
+          if (!shortcutMode && (inputText.trim() || transcript.trim())) {
+            markMeaningfulInteraction();
           }
 
           const forceCloseState = decideContinuationMode({
@@ -296,7 +340,7 @@ export default function App() {
                  <button onClick={() => {
                    useSessionStore.getState().resetSession();
                  }} className="btn-primary" style={{ marginTop: 12, background: 'var(--border-color)', color: 'white' }}>
-                   Nova Triagem Livre
+                   Começar nova exploração
                  </button>
                </div>
             )}

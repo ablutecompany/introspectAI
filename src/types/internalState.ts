@@ -4,6 +4,60 @@ export type InternalStatePhase =
   | 'CONTINUATION_ACTIVE'
   | 'CLOSE_NOW';
 
+// ─── Sprint 6: Delta entre Sessões ─────────────────────────────────────────────
+
+/**
+ * Direção percebida da mudança entre sessões.
+ * Classificada pelo deltaEngine com base nas respostas de follow-up.
+ * Valor honesto: 'too_early' quando não há informação suficiente.
+ */
+export type ChangeDirection =
+  | 'improved'     // melhorou — menos pressão, mais clareza
+  | 'worsened'     // piorou — mais pressão, menos clareza
+  | 'stable'       // manteve-se — padrão igual
+  | 'shifted'      // mudou de natureza — não melhor nem pior, mas diferente
+  | 'too_early';   // cedo demais para saber
+
+/**
+ * O que o sistema vai fazer com o caso após o follow-up.
+ * Decidido pelo caseAdjustmentEngine com base no delta observado.
+ *
+ * Ponto de extensão: Sprint 7 usa isto para orientar o primeiro passo.
+ */
+export type WorkingDirection =
+  | 'confirm'      // hipótese confirmada — aprofundar dentro do mesmo foco
+  | 'correct'      // hipótese errada ou incompleta — redirecionar
+  | 'deepen'       // hipótese válida mas falta função/tensão/custo
+  | 'stabilize';   // mais clareza, menos variação — manter e consolidar
+
+/**
+ * Snapshot do delta calculado na reentrada atual.
+ * Guardado no CaseMemory para reutilização em sessões futuras.
+ */
+export interface ProgressDelta {
+  /** Direção da mudança observada nesta reentrada. */
+  changeDirection: ChangeDirection;
+  /** Confiança do motor nesta classificação (0–1). */
+  changeConfidence: number;
+  /** Linha humana sobre o que mudou (para mostrar na próxima ReentryGate). */
+  changeSummaryLine: string | null;
+  /** Timestamp quando este delta foi calculado. */
+  calculatedAt: number;
+}
+
+/**
+ * Inferência do motor sobre o que fazer a seguir com o caso.
+ * Calculada no fim do follow-up com base no delta + memória existente.
+ */
+export interface FollowUpInference {
+  /** O que fazer ao caso. */
+  workingDirection: WorkingDirection;
+  /** Razão interna (para log/debug — não exposta ao utilizador). */
+  reason: string;
+  /** Timestamp desta inferência. */
+  inferredAt: number;
+}
+
 // ─── Longitudinal Architecture ──────────────────────────────────────────────────
 
 export type SessionStage = 
@@ -32,10 +86,17 @@ export interface CaseMemory {
     pendingWorkAssigned: boolean;
   };
 
-  // ─── Sprint 3: Registo de Discriminação ──────────────────────────────────────────
+  // ─── Sprint 3: Registo de Discriminação ────────────────────────────────────────
   // Guarda o histórico de perguntas discriminadoras feitas ao utilizador
   // para evitar repetição disfarada e actualizar confiança com base nas respostas.
   discriminationRecord: DiscriminationEntry[];
+
+  // ─── Sprint 6: Delta entre Sessões ─────────────────────────────────────────────
+  // Campos opcionais — só existem quando houve pelo menos uma reentrada respondida.
+  /** Último snapshot de mudança calculado na reentrada. Null na primeira sessão. */
+  lastProgressDelta: ProgressDelta | null;
+  /** Inferência actual sobre o que fazer com o caso. Guia o fluxo pós-reentrada. */
+  followUpInference: FollowUpInference | null;
 }
 
 /** Uma única interacção de pergunta discriminadora, imutável após registo. */
@@ -92,16 +153,31 @@ export type IntensityLevel = 'low' | 'medium' | 'high';
 export type ConfidenceLevel = 'insufficient' | 'moderate' | 'strong';
 export type ContinuityMode = 'resume' | 'reopen' | 'work_from_previous' | null;
 
+/** Estado do caso ativo — persiste entre sessões no mesmo browser. */
+export type CaseStatus = 'active' | 'paused' | 'completed' | 'abandoned';
+
 export interface SessionMeta {
   sessionId: string;
+  /** Identificador estável do caso (≠ sessionId que muda por sessão).
+   *  Gerado uma vez quando o caso é criado. Nunca reutilizado.
+   *  Ponto de extensão: em futuro backend, ligar este id ao userId. */
+  caseId: string;
   userId?: string;
   isFirstSession: boolean;
   isRegisteredUser: boolean;
   startedAt: number;
   updatedAt: number;
+  /** Timestamp da última resposta com conteúdo semântico real (não contadores de turno). */
+  lastMeaningfulInteractionAt: number;
   turnCount: number;
   questionCount: number;
   answerCount: number;
+  /** Estado do caso — permite distinguir exploração nova de retoma. */
+  caseStatus: CaseStatus;
+  /** Número de sessões que este caso já teve (incrementa em cada reentrada). */
+  sessionCount: number;
+  /** Verdadeiro quando existe caso retomável no mesmo browser/dispositivo. */
+  resumeAvailable: boolean;
 }
 
 export interface GovernanceState {

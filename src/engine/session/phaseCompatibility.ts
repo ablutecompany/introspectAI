@@ -1,4 +1,4 @@
-import { InternalStatePhase, SessionStage } from '../../types/internalState';
+import type { InternalStatePhase, SessionStage } from '../../types/internalState';
 
 /**
  * Deduz o novo SessionStage longitudinal a partir da Phase antiga legacy.
@@ -33,8 +33,11 @@ export function inferLegacyPhaseFromSessionStage(stage: SessionStage): InternalS
       return 'CONTINUATION_ACTIVE';
     case 'EMERGENT_READING':
       return 'LATENT_READING_DISPLAY';
-    case 'WORK_ASSIGNMENT':
     case 'FOLLOW_UP_REENTRY':
+      // Sprint 5: FOLLOW_UP_REENTRY está agora activo — mapeia para CONTINUATION_ACTIVE
+      // para que o App.tsx renderize o fluxo de follow-up em vez de fechar.
+      return 'CONTINUATION_ACTIVE';
+    case 'WORK_ASSIGNMENT':
     case 'CLOSE_NOW':
       return 'CLOSE_NOW';
     default:

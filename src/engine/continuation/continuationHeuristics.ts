@@ -74,3 +74,32 @@ export function isContinuationLikelyToRepeat(state: InternalState): boolean {
   // Se já bateu na extensão uma vez, probabilidade de repetição cega (Parrot Echoing) é brutal.
   return state.governance.extensionCount > 0 || state.governance.fatigueSignals.length >= 2;
 }
+
+// ─── Sprint 7: Heurística de Reentrada ────────────────────────────────────────
+
+/**
+ * 7. isReturnSessionWithInference
+ *
+ * Verdadeiro quando:
+ * - É uma sessão de reentrada (sessionCount > 1 OU sessionNovelty === 'recurring')
+ * - Existe followUpInference calculado no CaseMemory (sprint 6+)
+ * - O caso está activo (não foi abandonado/concluído)
+ *
+ * Quando verdadeiro, o continuationEngine usa workingDirection
+ * em vez das heurísticas clássicas de triagem.
+ * As heurísticas clássicas foram construídas para primeiras sessões
+ * e podem dar outputs menos relevantes para casos com histórico.
+ */
+export function isReturnSessionWithInference(state: InternalState): boolean {
+  const isReturning =
+    state.sessionMeta.sessionCount > 1 ||
+    state.governance.sessionNovelty === 'recurring';
+
+  const hasInference = !!state.caseMemory.followUpInference;
+
+  const caseIsActive =
+    state.sessionMeta.caseStatus === 'active' ||
+    state.sessionMeta.caseStatus === 'paused'; // paused também tem histórico válido
+
+  return isReturning && hasInference && caseIsActive;
+}
