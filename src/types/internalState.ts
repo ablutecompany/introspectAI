@@ -60,14 +60,17 @@ export interface FollowUpInference {
 
 // ─── Longitudinal Architecture ──────────────────────────────────────────────────
 
-export type SessionStage = 
+export type SessionStage =
   | 'ENTRY_ORIENTATION'
   | 'PROVISIONAL_FOCUS'
   | 'DISCRIMINATIVE_EXPLORATION'
   | 'EMERGENT_READING'
+  | 'READING_CHECKPOINT'    // Sprint 8: gate entre leitura emergente e orientação
   | 'WORK_ASSIGNMENT'
   | 'FOLLOW_UP_REENTRY'
   | 'CLOSE_NOW';
+
+
 
 export interface CaseMemory {
   currentFocus: string | null;
@@ -92,12 +95,31 @@ export interface CaseMemory {
   discriminationRecord: DiscriminationEntry[];
 
   // ─── Sprint 6: Delta entre Sessões ─────────────────────────────────────────────
-  // Campos opcionais — só existem quando houve pelo menos uma reentrada respondida.
   /** Último snapshot de mudança calculado na reentrada. Null na primeira sessão. */
   lastProgressDelta: ProgressDelta | null;
   /** Inferência actual sobre o que fazer com o caso. Guia o fluxo pós-reentrada. */
   followUpInference: FollowUpInference | null;
+
+// ─── Sprint 9: Estado de Clarificação e Repair Loop ────────────────────────────
+  // Regista as intenções que já foram alvo de clarificação (intentTag -> attempts).
+  // Permite limitar loops (ex: max 1 reformulação por tag).
+  clarificationRecord: Record<string, number>;
+
+  // ─── Sprint 10: Extração Semântica Leve ───────────────────────────────────────
+  /** Último significado substantivo extraído da resposta do utilizador */
+  lastExtractedMeaning: string | null;
+  /** Fragmentos exatos de frases úteis que o utilizador usou */
+  userPhrasingFragments: string[];
+  /** Termos isolados fortes que podem ser usados para reflexo */
+  salientTerms: string[];
+  
+  // ─── Sprint 10B: Sinais de Correção ──────────────────────────────────────────
+  /** Último sinal de correção explícito submetido pelo utilizador */
+  lastCorrectionSignal: string | null;
+  /** Registo da última correção aplicada ao foco ou hipótese */
+  correctionNote: string | null;
 }
+
 
 /** Uma única interacção de pergunta discriminadora, imutável após registo. */
 export interface DiscriminationEntry {

@@ -53,10 +53,11 @@ export function ReentryGate({ onContinue, onStartFresh }: ReentryGateProps) {
             textTransform: 'uppercase',
             marginBottom: 12,
           }}>
-            Última exploração — {summary.lastSeenLabel}
+            Última exploração — {summary.lastSeenLabel} • <span style={{color: 'var(--accent-text)'}}>{summary.caseStateLabel}</span>
           </p>
           <h1 style={{ fontSize: '1.5rem', lineHeight: 1.3, color: 'var(--text-main)', margin: 0 }}>
-            Ficámos a explorar {summary.focusLabel}.
+            {/* Sprint 10C: Wording mais humano e pessoal */}
+            Na última vez, ficaste a explorar "{summary.focusLabel}".
           </h1>
         </div>
 
@@ -104,6 +105,9 @@ export function ReentryGate({ onContinue, onStartFresh }: ReentryGateProps) {
               borderTop: '1px solid var(--border-color)',
               paddingTop: 14,
             }}>
+              <p style={{ margin: 0, fontSize: '0.8rem', color: 'var(--text-muted)', marginBottom: 4 }}>
+                Da última vez para cá...
+              </p>
               <p style={{
                 margin: 0,
                 fontSize: '0.85rem',
@@ -111,7 +115,7 @@ export function ReentryGate({ onContinue, onStartFresh }: ReentryGateProps) {
                 lineHeight: 1.5,
                 fontStyle: 'italic',
               }}>
-                {summary.deltaLine}
+                "{summary.deltaLine}"
               </p>
             </div>
           )}

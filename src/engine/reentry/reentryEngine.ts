@@ -92,26 +92,38 @@ export function buildCaseResumeSummary(state: InternalState): CaseResumeSummary 
 
   // Área de foco (fallback para C se não houver triagem)
   const primaryArea = (triage?.primary_problem_area ?? 'C') as Exclude<FrictionArea, 'G'>;
-  const focusLabel = AREA_HUMAN_LABELS[primaryArea];
+  
+  // Sprint 8: Usar currentFocus real se existir, em vez da área abstrata
+  let focusLabel = memory.currentFocus ?? AREA_HUMAN_LABELS[primaryArea];
 
-  // Hipótese provisória — usar a do caso se existir
+  // Sprint 10C: Camada de idioleto leve — usar um termo forte do utilizador
+  if (memory.salientTerms && memory.salientTerms.length > 0) {
+     const term = memory.salientTerms[memory.salientTerms.length - 1]; // O mais recente
+     if (!focusLabel.toLowerCase().includes(term.toLowerCase())) {
+        focusLabel = `${focusLabel} (com notas de "${term}")`;
+     }
+  }
+
+  // Sprint 10C: Só consideramos a hipótese plausível para resumo se a confiança não estiver degradada
+  // Se houve correção vaga, o confidenceState é insufficient e a hipótese provisória terá sido anulada.
+  const hasConcreteHypothesis =
+    memory.confidenceState !== 'insufficient' ||
+    (memory.discriminationRecord?.length ?? 0) > 0;
+
+  // Hipótese provisória — não repetir o currentFocus se já foi usado como focusLabel
   let hypothesisLabel: string | null = null;
-  if (memory.currentFocus) {
-    hypothesisLabel = memory.currentFocus;
-  } else if (memory.provisionalHypothesis) {
-    hypothesisLabel = memory.provisionalHypothesis;
-  } else if (memory.hiddenFunctionCandidate) {
-    hypothesisLabel = memory.hiddenFunctionCandidate;
+  if (hasConcreteHypothesis) {
+      if (memory.provisionalHypothesis && memory.provisionalHypothesis !== focusLabel) {
+        hypothesisLabel = memory.provisionalHypothesis;
+      } else if (memory.hiddenFunctionCandidate && memory.hiddenFunctionCandidate !== focusLabel) {
+        hypothesisLabel = memory.hiddenFunctionCandidate;
+      }
   }
 
   // Timestamp para "há X dias"
   const lastSeenLabel = buildLastSeenLabel(
     meta.lastMeaningfulInteractionAt ?? meta.updatedAt
   );
-
-  const hasConcreteHypothesis =
-    memory.confidenceState !== 'insufficient' ||
-    (memory.discriminationRecord?.length ?? 0) > 0;
 
   return {
     focusLabel,
@@ -132,16 +144,16 @@ export function buildCaseResumeSummary(state: InternalState): CaseResumeSummary 
  * no delta entre sessões e nas mudanças de confidenceState.
  */
 export function buildFollowUpQuestions(state: InternalState): FollowUpQuestion[] {
-  const triage = state.triageState;
   const memory = state.caseMemory;
+  const triage = state.triageState;
 
   const primaryArea = (triage?.primary_problem_area ?? 'C') as Exclude<FrictionArea, 'G'>;
-  const focusLabel = AREA_HUMAN_LABELS[primaryArea];
+  const focusLabel = memory.currentFocus ?? AREA_HUMAN_LABELS[primaryArea];
 
   const questions: FollowUpQuestion[] = [
     {
       tag: 'reentry_change',
-      questionText: `O que mudou desde a última vez em relação a ${focusLabel}?`,
+      questionText: `O que mudou desde a última vez em relação a "${focusLabel}"?`,
       contextType: 'follow_up',
     },
     {
@@ -203,6 +215,8 @@ export interface EnrichedResumeSummary extends CaseResumeSummary {
    * Ex: "Hoje vamos perceber se o padrão se confirma ou se afinal era outra coisa."
    */
   sessionOpeningLine: string;
+  /** Label de estado do caso para display no ReentryGate. */
+  caseStateLabel: string;
 }
 
 /**
@@ -215,8 +229,9 @@ export function buildEnrichedResumeSummary(state: InternalState): EnrichedResume
   const delta = state.caseMemory.lastProgressDelta;
   const inference = state.caseMemory.followUpInference;
 
-  // Linha de delta da sessão anterior
-  const deltaLine = delta?.changeSummaryLine ?? null;
+  // Linha de delta da sessão anterior (Sprint 8: só mostrar se confiança >= 0.5)
+  const showDelta = delta && delta.changeConfidence >= 0.5;
+  const deltaLine = showDelta ? delta.changeSummaryLine : null;
 
   // Linha de abertura baseada no que o sistema decidiu fazer
   let sessionOpeningLine: string;
@@ -240,9 +255,20 @@ export function buildEnrichedResumeSummary(state: InternalState): EnrichedResume
     }
   }
 
+  // Label descritiva do estado
+  let caseStateLabel = 'em exploração';
+  if (inference?.workingDirection === 'stabilize') {
+     caseStateLabel = 'a consolidar';
+  } else if (state.caseMemory.provisionalHypothesis || inference?.workingDirection === 'confirm') {
+     caseStateLabel = 'hipótese em trabalho';
+  } else if (state.caseMemory.currentFocus) {
+     caseStateLabel = 'leitura aberta';
+  }
+
   return {
     ...base,
     deltaLine,
     sessionOpeningLine,
+    caseStateLabel,
   };
 }

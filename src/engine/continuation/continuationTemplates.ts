@@ -201,7 +201,7 @@ function getCorrectOutput(state: InternalState) {
     mainText: previousHypothesis
       ? `${changeClue} A leitura de "${previousHypothesis}" pode não ser o quadro completo. Não quer dizer que estava errada — quer dizer que o padrão tem mais textura do que o que vimos da última vez.`
       : `${changeClue} O foco em ${areaShort} mantém-se, mas a mecânica por baixo pode ser diferente do que tínhamos assumido.`,
-    optionalPrompt: `O que é que te parece agora mais perto da raiz do que estava antes?`,
+    optionalPrompt: `Se tivesses de apostar numa causa completamente diferente para isto, qual seria a primeira que te vinha à cabeça agora?`,
     closingText: microStep,
   };
 }
@@ -232,22 +232,22 @@ function getDeepenOutput(state: InternalState) {
     // Aprofundar pela função oculta
     mainText = `O foco em ${areaShort} está a segurar-se, mas ainda não percebemos bem o que é que este padrão está a fazer por ti — o que é que ele permite evitar, adiar ou não ter de enfrentar.`;
     optionalPrompt = pickByHash([
-      `O que achas que deixaria de acontecer se este problema desaparecesse de repente? Não o que ganharias — o que deixarias de poder ignorar.`,
-      `Há algo que este padrão te permite não ter de fazer, ou não ter de decidir? Pode ser algo pequeno e aparentemente sem relação.`,
+      `Não é para encontrares a resposta hoje. Mas pensa nisto: Se este problema fosse resolvido hoje por magia, que outra decisão aborrecida ou difícil terias de enfrentar logo a seguir?`,
+      `Pensa um pouco nisto: Que tarefa, conversa ou decisão é que esta situação te está a dar uma desculpa (mesmo que involuntária) para adiar?`,
     ], hashBase);
   } else if (!hasAskedCost) {
     // Aprofundar pelo custo invisível
     mainText = `A trajectória em ${areaShort} é clara, mas o custo real — o que isto drena de forma silenciosa — ainda não foi nomeado directamente.`;
     optionalPrompt = pickByHash([
-      `Qual é o preço que pagas por teres este padrão tão instalado? Não o incómodo óbvio — o que é que sai pela calada.`,
-      `O que é que esta situação continua a custar-te sem que lhe dês atenção directa? Não em dinheiro ou tempo — em energia ou atenção.`,
+      `Deixa só a pergunta no ar durante hoje: O que é que deixaste fisicamente de conseguir fazer nos últimos 3 dias por estares a gastar forças a lidar com isto?`,
+      `Apenas repara nisto ao longo da semana: Em que momento exato a energia te faltou para algo que antes era fácil, só porque este tema estava a correr em pano de fundo?`,
     ], hashBase);
   } else {
     // Aprofundar pela tensão não resolvida
     mainText = `Em ${areaShort}, já identificámos função e custo. O que falta é perceber onde é que a tensão entre o que é exigido e o que tens realmente disponível está a apertar mais.`;
     optionalPrompt = pickByHash([
-      `Onde é que sentes que há mais distância entre o que é pedido e o que tens para dar?`,
-      `Em que momento do dia ou da semana é que essa diferença entre a exigência e o que está disponível se sente mais?`,
+      `Sem tentar analisar demasiado: Qual foi o momento da tua semana em que sentiste de forma mais óbvia que a força que tinhas não ia chegar para o que estava à tua frente?`,
+      `Mantém os olhos abertos para isto: Onde é que o sapato aperta mais neste momento — naquilo que és mesmo obrigado a fazer, ou naquilo que tu exiges de ti próprio?`,
     ], hashBase);
   }
 

@@ -39,10 +39,20 @@ interface SessionStore extends InternalState {
   updateProgressDelta: (delta: ProgressDelta) => void;
   /** Guarda a inferência de ajuste de caso calculada no fim do follow-up. */
   applyFollowUpInference: (inference: FollowUpInference) => void;
+
+  // Sprint 8: Clarificação e reset de caso
+  /**
+   * Cria um caso realmente novo — limpa tudo incluindo CaseMemory e caseId.
+   * Usar em vez de resetSession() quando o utilizador escolhe "Começar nova exploração"
+   * para garantir que não herda estado do caso anterior.
+   */
+  startFreshCase: () => void;
+  /** Regista que uma pergunta foi reformulada para evitar reformular em loop. */
+  updateClarificationState: (intentTag: string) => void;
 }
 
 const CURRENT_SCHEMA_VERSION = 6;
-const CURRENT_APP_VERSION = 'v5.1.Sprint6';
+const CURRENT_APP_VERSION = 'v5.1.Sprint9';
 const EXPIRY_DAYS = 14;
 
 /** Gera um id curto aleatório para sessionId (muda por sessão). */
@@ -105,6 +115,15 @@ const buildInitialState = (): Omit<InternalState, 'schemaVersion' | 'appVersion'
       // Sprint 6: campos de delta (null na primeira sessão)
       lastProgressDelta: null,
       followUpInference: null,
+      // Sprint 9: estado de clarificação para evitar loops infindáveis de repair
+      clarificationRecord: {},
+      // Sprint 10: Extração semântica
+      lastExtractedMeaning: null,
+      userPhrasingFragments: [],
+      salientTerms: [],
+      // Sprint 10B: Sinais de Correção
+      lastCorrectionSignal: null,
+      correctionNote: null,
     },
     
     sessionMeta: {
@@ -315,6 +334,38 @@ export const useSessionStore = create<SessionStore>()(
          },
          sessionMeta: { ...state.sessionMeta, updatedAt: now() }
       })),
+
+      // ─── Sprint 8: Reset real + Clarificação ─────────────────────────────────
+
+      /**
+       * Cria um caso genuinamente novo.
+       * Equivalente ao resetSession mas garante que buildInitialState é chamado
+       * com um novo caseId — nunca herda o id do caso anterior.
+       * Usar quando o utilizador escolhe "Começar nova exploração".
+       */
+      startFreshCase: () => set({
+        schemaVersion: CURRENT_SCHEMA_VERSION,
+        appVersion: CURRENT_APP_VERSION,
+        ...buildInitialState(), // buildInitialState chama generateCaseId() → novo id garantido
+      }),
+
+      /**
+       * Regista que uma pergunta foi reformulada pelo clarificationEngine.
+       * Impede reformulação em loop para o mesmo intentTag limitando as tentativas.
+       */
+      updateClarificationState: (intentTag) => set((state) => {
+        const attempts = state.caseMemory.clarificationRecord?.[intentTag] ?? 0;
+        return {
+          caseMemory: {
+            ...state.caseMemory,
+            clarificationRecord: {
+              ...(state.caseMemory.clarificationRecord ?? {}),
+              [intentTag]: attempts + 1,
+            },
+          },
+          sessionMeta: { ...state.sessionMeta, updatedAt: now() }
+        };
+      }),
     }),
     {
       name: 'introspect-session-storage',

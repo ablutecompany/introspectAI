@@ -60,6 +60,10 @@ const FEEDBACK_MESSAGES = [
 const MIN_SEMANTIC_LENGTH = 10;
 const VAPID_MAX_LENGTH = 30; // só aplica vapid check em respostas curtas
 
+// ─── Sprint 9: Semantic Engine Adoption ──────────────────────────────────────────
+// Tokens e classifyInputIntent foram removidos e centralizados em semanticAssimilationEngine.ts
+
+
 // ─── Função principal ──────────────────────────────────────────────────────────
 
 /**

@@ -9,6 +9,9 @@ import { decideContinuationMode } from '../engine/continuation/continuationEngin
 import { inferSessionStageFromLegacyPhase } from '../engine/session/phaseCompatibility';
 import { buildDiscriminationQuestion, interpretDiscriminationAnswer } from '../engine/session/discriminationEngine';
 import { buildEmergentReading, inferReadingStageFromMemory } from '../engine/emergentReadingEngine';
+import { assimilateInputSemantic } from '../engine/semantic/semanticAssimilationEngine';
+import { buildClarification } from '../engine/clarification/clarificationEngine';
+import { ReadingCheckpoint } from '../features/session/ReadingCheckpoint';
 import type { TriageState } from '../types/internalState';
 import './index.css';
 
@@ -77,7 +80,7 @@ export default function App() {
             continueExistingCase();
           }}
           onStartFresh={() => {
-            useSessionStore.getState().resetSession();
+            useSessionStore.getState().startFreshCase();
           }}
         />
       </div>
@@ -121,7 +124,15 @@ export default function App() {
     const handleProceed = () => {
       stopSpeaking();
       const state = useSessionStore.getState();
-      // Sprint 4: Sincronizar sessionStage com a maturidade real do caso
+      
+      // Sprint 8: Em Leitura Emergente, não vamos logo para a orientação de trabalho.
+      // Paramos no ReadingCheckpoint para confirmar se a leitura bate certo.
+      if (emergentOutput) {
+        setSessionStage('READING_CHECKPOINT');
+        return;
+      }
+
+      // Sprint 4: Se for hipótese provisória, avança normalmente.
       const correctStage = inferReadingStageFromMemory(state.caseMemory);
       const contState = decideContinuationMode(state);
       
@@ -131,6 +142,25 @@ export default function App() {
          continuationState: contState 
       });
     };
+
+    // ─── Render: READING CHECKPOINT (Sprint 8) ────────────────────────────────
+    if (emergentOutput && sessionStage === 'READING_CHECKPOINT') {
+      const handleCheckpointProceed = () => {
+         const state = useSessionStore.getState();
+         const correctStage = inferReadingStageFromMemory(state.caseMemory);
+         const contState = decideContinuationMode(state);
+         
+         updateState({ 
+            phase: 'CONTINUATION_ACTIVE', 
+            sessionStage: correctStage,
+            continuationState: contState 
+         });
+      };
+
+      return (
+        <ReadingCheckpoint onProceed={handleCheckpointProceed} />
+      );
+    }
 
     // ─── Render: LEITURA EMERGENTE (com maturidade) ──────────────────────────
     if (emergentOutput) {
@@ -196,6 +226,92 @@ export default function App() {
 
     // A resposta encerra a aplicação liminarmente (Bypass de Loops Infinitos LLM)
     const submitResponse = (shortcutMode?: 'close' | 'refute') => {
+       const userText = inputText.trim() || transcript.trim();
+
+       // Sprint 9: Assimilação Semântica e Tratamento Consequente
+       if (!shortcutMode && userText) {
+          const currentState = useSessionStore.getState();
+          const semantic = assimilateInputSemantic(userText, 'free', currentState);
+
+          if (semantic.category === 'vague_escape' || semantic.category === 'too_short') {
+              alert('Preciso de um pouco mais de detalhe. Se preferires não avançar, podes fechar a sessão ou dizer que não queres responder.');
+              return;
+          }
+
+          if (semantic.category === 'confusion') {
+            const intentTag = continuationState?.outputPayload?._discriminationIntentTag ?? 'generic';
+            const clarification = buildClarification(intentTag, currentState);
+            
+            // Marca a tentativa no store
+            useSessionStore.getState().updateClarificationState(intentTag);
+            
+            if (!clarification.canClarifyAgain) {
+                 // Fecho honesto se esgotou
+                 setIsProcessing(true);
+                 setTimeout(() => {
+                    updateState({ phase: 'CLOSE_NOW', sessionStage: 'CLOSE_NOW' });
+                    setIsProcessing(false);
+                 }, 600);
+                 return;
+            }
+
+            // Atualiza localmente a pergunta opcional 
+            updateState({
+               continuationState: {
+                   ...continuationState!,
+                   outputPayload: {
+                       ...continuationState!.outputPayload!,
+                       optionalPrompt: clarification.reformulatedQuestion
+                   }
+               }
+            });
+            setInputText(''); // limpa a textArea
+            return;
+          }
+          
+          if (semantic.category === 'refusal') {
+            shortcutMode = 'close';
+          }
+          
+          // Sprint 10: Guardar extrações úteis gerais no CaseMemory
+          if (semantic.salientTerms?.length || semantic.userPhrasingFragments?.length || semantic.extractedMeaning) {
+            const memoryUpdate: Partial<typeof currentState.caseMemory> = {};
+            if (semantic.extractedMeaning) memoryUpdate.lastExtractedMeaning = semantic.extractedMeaning;
+            if (semantic.salientTerms?.length) {
+              const currentTerms = currentState.caseMemory.salientTerms || [];
+              memoryUpdate.salientTerms = Array.from(new Set([...currentTerms, ...semantic.salientTerms]));
+            }
+            if (semantic.userPhrasingFragments?.length) {
+              const currentFrags = currentState.caseMemory.userPhrasingFragments || [];
+              memoryUpdate.userPhrasingFragments = Array.from(new Set([...currentFrags, ...semantic.userPhrasingFragments]));
+            }
+            useSessionStore.getState().updateCaseMemory(memoryUpdate);
+          }
+          
+          if (semantic.category === 'correction' || semantic.category === 'disagreement') {
+            // Sprint 10B: A correção passa a ter consequência real
+            const memoryUpdate: Partial<typeof currentState.caseMemory> = {
+                lastCorrectionSignal: userText,
+                correctionNote: semantic.extractedMeaning || 'Correção vaga sem substituto claro',
+                confidenceState: 'insufficient' // Reduz confiança dado que a hipótese anterior não serviu
+            };
+
+            // Se houver um substituto claro, aplicamos
+            if (semantic.candidateFocusShift) {
+                memoryUpdate.currentFocus = semantic.candidateFocusShift;
+                memoryUpdate.provisionalHypothesis = null; // Limpa para forçar re-avaliação do novo foco
+            } else if (semantic.candidateHypothesisShift) {
+                memoryUpdate.provisionalHypothesis = semantic.candidateHypothesisShift;
+            } else {
+                // Correção vaga: apenas destruímos a hipótese para não teimar, mas preservamos o foco genérico
+                memoryUpdate.provisionalHypothesis = null;
+            }
+
+            useSessionStore.getState().updateCaseMemory(memoryUpdate);
+            shortcutMode = 'refute';
+          }
+       }
+
        setIsProcessing(true);
        stopListening();
        stopSpeaking();
@@ -213,7 +329,7 @@ export default function App() {
             if (discriminationQ && discriminationQ.intentTag === intentTag) {
               const rawAnswer = shortcutMode === 'refute'
                 ? '' // refutação explícita = sem confirmação
-                : (inputText.trim() || transcript.trim());
+                : userText;
               const memoryUpdate = interpretDiscriminationAnswer(currentState, discriminationQ, rawAnswer);
               updateCaseMemory(memoryUpdate);
               // Sprint 6: marcar interação significativa quando há resposta discriminadora real
@@ -229,7 +345,7 @@ export default function App() {
 
           // Sprint 6: marcar interação significativa quando o utilizador submeteu resposta real
           // (não em cancel/refute — esses são encerramento, não material clínico)
-          if (!shortcutMode && (inputText.trim() || transcript.trim())) {
+          if (!shortcutMode && userText) {
             markMeaningfulInteraction();
           }
 
@@ -338,7 +454,7 @@ export default function App() {
                <div style={{ marginTop: 24, padding: 16, borderTop: '1px solid var(--border-color)', color: 'var(--text-muted)', fontSize: '0.9rem' }}>
                  A sessão está fechada. Leva a leitura e aplica o exercício offline.<br/><br/>
                  <button onClick={() => {
-                   useSessionStore.getState().resetSession();
+                   useSessionStore.getState().startFreshCase();
                  }} className="btn-primary" style={{ marginTop: 12, background: 'var(--border-color)', color: 'white' }}>
                    Começar nova exploração
                  </button>
