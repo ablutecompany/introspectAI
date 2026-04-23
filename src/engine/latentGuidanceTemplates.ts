@@ -1,6 +1,6 @@
 import type { FrictionArea, ImmediateGoal } from '../types/internalState';
 
-export const MAPA_LATENTE: Record<Exclude<FrictionArea, 'G'>, { base: string, tension: [string, string], cost: string }> = {
+export const MAPA_LATENTE: Record<FrictionArea, { base: string, tension: [string, string], cost: string }> = {
   A: {
     base: 'desgaste e vigilância ativa do corpo',
     tension: ['o desconforto sentido', 'a necessidade absoluta de segurança imediata'],
@@ -30,10 +30,15 @@ export const MAPA_LATENTE: Record<Exclude<FrictionArea, 'G'>, { base: string, te
     base: 'um desalinhamento de eixo ou sentido',
     tension: ['a vida que está a ser vivida de facto', 'aquilo que verdadeiramente faria sentido'],
     cost: 'fiques paralisado por sentires que tens de descobrir uma resposta gigante de uma vez'
+  },
+  G: {
+    base: 'um emaranhado de múltiplas tensões',
+    tension: ['as várias frentes abertas', 'a tua capacidade de as processar isoladamente'],
+    cost: 'te sintas perdido no meio do ruído, sem saber por onde começar a puxar o fio'
   }
 };
 
-export const MAPA_ORIENTACAO: Record<Exclude<FrictionArea, 'G'>, { avoid_now: string, repositioning: string, distinction: [string, string], micro_step: string }> = {
+export const MAPA_ORIENTACAO: Record<FrictionArea, { avoid_now: string, repositioning: string, distinction: [string, string], micro_step: string }> = {
   A: {
     avoid_now: 'entrar já numa espiral de interpretação sobre o que cada sinal significa',
     repositioning: 'não tratar isto apenas como uma falha da "máquina" a ser corrigida à força',
@@ -69,6 +74,12 @@ export const MAPA_ORIENTACAO: Record<Exclude<FrictionArea, 'G'>, { avoid_now: st
     repositioning: 'aceitar olhar para a pressão de escolher sem tentar arrancar logo a escolha',
     distinction: ['a dificuldade concreta sobre uma direção', 'o peso exagerado em como essa direção tem de definir tudo'],
     micro_step: 'apontar o que te parece ainda ter alguma vida e o que, efetivamente, está estagnado e em peso morto'
+  },
+  G: {
+    avoid_now: 'tentar resolver todas as frentes ao mesmo tempo',
+    repositioning: 'não tratar isto como um caos insolúvel, mas como um problema de prioridade',
+    distinction: ['o que é urgente', 'o que é verdadeiramente importante'],
+    micro_step: 'escolhe uma única pequena tarefa e ignora o resto por 15 minutos'
   }
 };
 

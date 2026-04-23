@@ -32,7 +32,7 @@ export function buildLatentAndGuidanceDeterministic(state: InternalState): Motor
   const mode = isEarlyClose ? 'MODE_EARLY_CLOSE' : (isDiffuse ? 'MODE_PROVISIONAL' : 'MODE_STANDARD');
 
   // Mapeamentos
-  const safeArea = area as Exclude<FrictionArea, 'G'>;
+  const safeArea = area;
   
   const latentData = MAPA_LATENTE[safeArea];
   const guidanceData = MAPA_ORIENTACAO[safeArea];

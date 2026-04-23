@@ -79,7 +79,7 @@ interface EmergentReadingComponents {
 function buildComponents(state: InternalState): EmergentReadingComponents {
   const triage = state.triageState;
   const memory = state.caseMemory;
-  const area = (triage?.primary_problem_area ?? 'C') as Exclude<FrictionArea, 'G'>;
+  const area = triage?.primary_problem_area ?? 'C';
   const latentData = MAPA_LATENTE[area];
 
   // Extracção de candidatos do histório de discriminação
@@ -198,7 +198,7 @@ export function buildEmergentReading(state: InternalState): EmergentReadingOutpu
   // Guidance leve — curta, não genérica, não resolve tudo
   // Sprint 5 pode tornar isto muito mais específico
   const triage = state.triageState;
-  const area = (triage?.primary_problem_area ?? 'C') as Exclude<FrictionArea, 'G'>;
+  const area = (triage?.primary_problem_area ?? 'C');
   const latentData = MAPA_LATENTE[area];
 
   const lightGuidance = `Por enquanto, a coisa mais útil é não tratar isto como problema a resolver, mas como padrão a observar. ${latentData.tension[0]} vai continuar a pressionar — não podes parar isso hoje. Podes começar a rasgar a confusão de outra forma.`;

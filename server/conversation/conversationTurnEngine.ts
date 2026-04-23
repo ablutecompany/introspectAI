@@ -50,6 +50,9 @@ ${phaseInstructions}
 `.trim();
 
     try {
+      console.log(`[LLM Engine] Chamando OpenAI (gpt-4o-mini)... Stage: ${request.sessionStage}`);
+      const llmStart = Date.now();
+      
       const completion = await (this.openai.beta as any).chat.completions.parse({
         model: 'gpt-4o-mini',
         messages: [
@@ -57,30 +60,38 @@ ${phaseInstructions}
           { role: 'user', content: request.lastUserInput },
         ],
         response_format: zodResponseFormat(ConversationTurnOutputSchema, 'turn_output'),
-        temperature: 0.1, // Alta previsibilidade
+        temperature: 0.1,
       });
 
+      const llmDuration = Date.now() - llmStart;
       const parsedOutput = completion.choices[0]?.message.parsed;
 
       if (!parsedOutput) {
+        console.error('[LLM Engine] Erro: Output não parseado. Raw content:', completion.choices[0]?.message.content);
         throw new Error('Falha no parsing estruturado do output LLM.');
       }
 
+      console.log(`[LLM Engine] Resposta recebida em ${llmDuration}ms. Action: ${parsedOutput.next_action}`);
       return parsedOutput;
-    } catch (error) {
-      console.error('[ConversationTurnEngine] Erro de API/Parsing:', error);
+    } catch (error: any) {
+      console.error('[LLM Engine] Erro de API/Parsing:', error);
       
-      // Fallback estruturado para garantir bounded fail-safe
+      // Detalhar o erro se for timeout ou limite de taxa
+      const isTimeout = error.code === 'ETIMEDOUT' || error.name === 'TimeoutError';
+      
+      // Fallback estruturado
       return {
-        assistant_text: "Tive uma falha de conexão e não consegui processar a última mensagem. Podes repetir?",
-        user_input_interpretation: "Erro na API",
+        assistant_text: isTimeout 
+          ? "A ligação à inteligência central expirou. Podes tentar novamente?" 
+          : "Tive uma falha técnica ao processar a tua resposta. Podes repetir?",
+        user_input_interpretation: "Erro Engine: " + (error.message || 'Unknown'),
         understanding_status: "insufficient",
         next_action: "clarify",
         target_stage: null,
         updated_focus: null,
         updated_hypothesis: null,
         needs_clarification: true,
-        clarification_text: "Ocorreu um erro de rede. Queres tentar de novo?",
+        clarification_text: isTimeout ? "Ocorreu um timeout. Repete por favor." : "Erro de processamento.",
         checkpoint_signal: false,
         close_session: false,
         suggested_ui_mode: 'warning',

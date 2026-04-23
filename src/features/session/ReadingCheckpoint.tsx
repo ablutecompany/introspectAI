@@ -144,10 +144,11 @@ export const ReadingCheckpoint: React.FC<Props> = ({ onProceed }) => {
 
   const handleCorrectionNaoSei = () => {
     // 3 - Encerrar a sessão de forma honesta sem fingir maturidade.
-    updateState({ 
-        phase: 'CLOSE_NOW', 
-        sessionStage: 'CLOSE_NOW'
+    const state = useSessionStore.getState();
+    updateState({
+       governance: { ...state.governance, shouldCloseNow: true, lastGovernanceReason: 'Falta de clareza inicial (abortado pelo utilizador).' }
     });
+    onProceed();
   };
 
   // ─── Renders ────────────────────────────────────────────────────────────────

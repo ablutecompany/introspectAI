@@ -4,6 +4,7 @@ import { useVoiceController } from '../features/voice/useVoiceController';
 import { TriageFlow } from '../features/triage/TriageFlow';
 import { ReentryGate } from '../features/session/ReentryGate';
 import { FollowUpFlow } from '../features/session/FollowUpFlow';
+import { ReadingCheckpoint } from '../features/session/ReadingCheckpoint';
 import { buildLatentAndGuidanceDeterministic } from '../engine/latentGuidanceEngine';
 import { decideContinuationMode } from '../engine/continuation/continuationEngine';
 import { inferSessionStageFromLegacyPhase } from '../engine/session/phaseCompatibility';
@@ -14,7 +15,7 @@ import type { ConversationTurnOutput, ConversationTurnRequest } from '../shared/
 import './index.css';
 
 export default function App() {
-  const { phase, sessionStage, triageState, continuationState, updateState, setTriageState } = useSessionStore();
+  const { phase, sessionStage, triageState, continuationState, updateState, setTriageState, lastTurnSnapshot } = useSessionStore();
   const updateCaseMemory = useSessionStore((s) => s.updateCaseMemory);
   const setSessionStage = useSessionStore((s) => s.setSessionStage);
   const continueExistingCase = useSessionStore((s) => s.continueExistingCase);
@@ -337,7 +338,11 @@ export default function App() {
                body: JSON.stringify(reqPayload)
            });
 
-           if (!res.ok) throw new Error('API Error');
+           if (!res.ok) { 
+                const errData = await res.json().catch(() => ({ error: 'No JSON body' }));
+                console.error('[Frontend DEBUG] API Failure:', res.status, errData); 
+                throw new Error('API Error ' + res.status + ': ' + (errData.error || 'Unknown')); 
+            }
            const turnResult: ConversationTurnOutput = await res.json();
 
            const memoryUpdate: Partial<typeof currentState.caseMemory> = {};
@@ -384,14 +389,15 @@ export default function App() {
            setInputText('');
            setIsProcessing(false);
 
-       } catch (err) {
-           console.warn('LLM API falhou, fallback estático', err);
+       } catch (err: any) { 
+            console.error("[Frontend DEBUG] Falha na API:", err);
+            const isDev = window.location.hostname.includes('localhost') || window.location.hostname.includes('vercel.app');
            updateState({
               continuationState: {
                   ...continuationState!,
                   outputPayload: {
                       ...continuationState!.outputPayload!,
-                      optionalPrompt: "Tive uma falha de rede. Podes repetir ou tentar fechar a sessão se preferires."
+                      optionalPrompt: isDev ? `[DEBUG] Falha no Motor LLM: ${err.message}` : "Tive uma falha de rede temporária. Podes tentar repetir a tua última resposta?"
                   }
               }
            });
@@ -462,7 +468,7 @@ export default function App() {
                     </div>
                 </div>
 
-                {useSessionStore.getState().lastTurnSnapshot && (
+                {lastTurnSnapshot && (
                   <div style={{ width: '100%', textAlign: 'center', marginTop: 12 }}>
                     <button 
                       className="btn-secondary" 

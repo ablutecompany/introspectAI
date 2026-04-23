@@ -17,6 +17,7 @@
 import { useState, useEffect } from 'react';
 import { useSessionStore } from '../../store/useSessionStore';
 import { classifyProgressDelta } from '../../engine/reentry/deltaEngine';
+
 import { decideCaseAdjustment, buildWorkingDirectionLine } from '../../engine/reentry/caseAdjustmentEngine';
 import { validateMinimumResponse } from '../../engine/validation/responseValidator';
 import { decideContinuationMode } from '../../engine/continuation/continuationEngine';
@@ -30,6 +31,7 @@ export function FollowUpFlow() {
   const setCaseStatus = useSessionStore((s) => s.setCaseStatus);
   const updateProgressDelta = useSessionStore((s) => s.updateProgressDelta);
   const applyFollowUpInference = useSessionStore((s) => s.applyFollowUpInference);
+  const lastTurnSnapshot = useSessionStore((s) => s.lastTurnSnapshot);
 
   const [answeredTags, setAnsweredTags] = useState<string[]>([]);
   const [answerCorpus, setAnswerCorpus] = useState<string[]>([]);
@@ -161,8 +163,8 @@ export function FollowUpFlow() {
            setDynamicQuestionText(turnResult.needs_clarification ? (turnResult.clarification_text || turnResult.assistant_text) : turnResult.assistant_text);
         }
         setIsProcessing(false);
-      } catch (err) {
-        console.warn('LLM Network falhou no turno, fallback estático', err);
+      } catch (err: any) {
+        console.error('[FollowUpFlow] Falha na chamada ao motor LLM:', err);
         setDynamicQuestionText("A ligação falhou. Se preferires, podes simplesmente saltar esta fase.");
         setUseFallback(true);
         setIsProcessing(false);
@@ -379,7 +381,7 @@ export function FollowUpFlow() {
             Podes saltar se não há nada novo a dizer.
           </p>
           
-          {useSessionStore.getState().lastTurnSnapshot && (
+          {lastTurnSnapshot && (
             <div style={{ width: '100%', textAlign: 'center', marginTop: 12 }}>
               <button 
                 className="btn-secondary" 
