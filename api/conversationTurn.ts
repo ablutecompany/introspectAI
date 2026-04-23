@@ -18,6 +18,10 @@ export default async function handler(
     return res.status(500).json({ error: 'Configuração em falta: OPENAI_API_KEY não encontrada.' });
   }
 
+  // Log mascarado para auditoria segura
+  const maskedKey = apiKey.substring(0, 7) + "..." + apiKey.substring(apiKey.length - 4);
+  console.log(`[API] Handler iniciado com KEY: ${maskedKey}`);
+
   try {
     const startTime = Date.now();
     const payload = req.body as ConversationTurnRequest;

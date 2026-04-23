@@ -33,6 +33,7 @@ export default function App() {
 
   const [inputText, setInputText] = useState('');
   const [isProcessing, setIsProcessing] = useState(false);
+    const [llmStatus, setLlmStatus] = useState<'IDLE' | 'READY' | 'ERROR' | 'FALLBACK'>('IDLE');
   const [showTranscriptInput, setShowTranscriptInput] = useState(false);
 
   // Derivados simples de UI de Voz
@@ -344,6 +345,7 @@ export default function App() {
                 throw new Error('API Error ' + res.status + ': ' + (errData.error || 'Unknown')); 
             }
            const turnResult: ConversationTurnOutput = await res.json();
+            setLlmStatus('READY');
 
            const memoryUpdate: Partial<typeof currentState.caseMemory> = {};
            if (turnResult.updated_focus) memoryUpdate.currentFocus = turnResult.updated_focus;
@@ -381,7 +383,7 @@ export default function App() {
                   ...continuationState!,
                   outputPayload: {
                       ...continuationState!.outputPayload!,
-                      optionalPrompt: turnResult.needs_clarification ? (turnResult.clarification_text || turnResult.assistant_text) : turnResult.assistant_text
+                      optionalPrompt: (turnResult.assistant_text.includes("[FALLBACK") || turnResult.assistant_text.includes("[DEBUG]")) ? turnResult.assistant_text : (turnResult.needs_clarification ? (turnResult.clarification_text || turnResult.assistant_text) : turnResult.assistant_text)
                   }
               }
            });
@@ -391,6 +393,7 @@ export default function App() {
 
        } catch (err: any) { 
             console.error("[Frontend DEBUG] Falha na API:", err);
+            setLlmStatus(err.message.includes('API Error') ? 'ERROR' : 'FALLBACK');
             const isDev = window.location.hostname.includes('localhost') || window.location.hostname.includes('vercel.app');
            updateState({
               continuationState: {
@@ -412,7 +415,21 @@ export default function App() {
         
         <div className="container" style={{ padding: '0 2rem' }}>
           <div className="splash" style={{ maxWidth: 640 }}>
-            <h1 style={{ marginBottom: '1.5rem', fontSize: '1.4rem' }}>{p.title}</h1>
+            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '1.5rem', width: '100%' }}>
+                <h1 style={{ margin: 0, fontSize: '1.4rem' }}>{p.title}</h1>
+                {(window.location.hostname.includes('localhost') || window.location.hostname.includes('vercel.app')) && (
+                  <div style={{ 
+                    fontSize: '0.65rem', 
+                    fontWeight: 700, 
+                    padding: '4px 8px', 
+                    borderRadius: 4, 
+                    background: llmStatus === 'READY' ? '#22c55e' : llmStatus === 'ERROR' ? '#ef4444' : llmStatus === 'FALLBACK' ? '#f59e0b' : '#64748b',
+                    color: '#fff'
+                  }}>
+                    MOTOR: {llmStatus}
+                  </div>
+                )}
+              </div>
             
             <div style={{ textAlign: 'left', background: 'var(--bg-card)', border: '1px solid var(--border-color)', borderRadius: 12, padding: 24, fontSize: '0.95rem', lineHeight: 1.7, color: 'var(--text-main)', marginBottom: 24 }}>
               <p style={{ margin: '0 0 16px 0' }}>{p.mainText}</p>

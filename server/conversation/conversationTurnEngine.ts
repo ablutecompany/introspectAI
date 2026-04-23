@@ -47,31 +47,49 @@ REGRAS GERAIS:
 
 INSTRUÇÕES ESPECÍFICAS DA FASE (${request.sessionStage}):
 ${phaseInstructions}
+
+IMPORTANTE: Responde EXCLUSIVAMENTE em formato JSON seguindo este esquema:
+{
+  "assistant_text": "string",
+  "user_input_interpretation": "string",
+  "understanding_status": "clear" | "confused" | "insufficient" | "disagreement",
+  "next_action": "clarify" | "ask_more" | "proceed" | "close_now",
+  "target_stage": "string" | null,
+  "updated_focus": "string" | null,
+  "updated_hypothesis": "string" | null,
+  "needs_clarification": boolean,
+  "clarification_text": "string" | null,
+  "checkpoint_signal": boolean,
+  "close_session": boolean,
+  "suggested_ui_mode": "normal" | "insight" | "warning" | null,
+  "suggested_shortcuts": ["string"]
+}
 `.trim();
 
     try {
       console.log(`[LLM Engine] Chamando OpenAI (gpt-4o-mini)... Stage: ${request.sessionStage}`);
       const llmStart = Date.now();
       
-      const completion = await (this.openai.beta as any).chat.completions.parse({
+      console.log(`[LLM Engine] Chamando OpenAI (gpt-4o-mini) via Standard Completions...`);
+      const completion = await this.openai.chat.completions.create({
         model: 'gpt-4o-mini',
         messages: [
           { role: 'system', content: systemPrompt },
           { role: 'user', content: request.lastUserInput },
         ],
-        response_format: zodResponseFormat(ConversationTurnOutputSchema, 'turn_output'),
+        response_format: { type: 'json_object' },
         temperature: 0.1,
       });
 
       const llmDuration = Date.now() - llmStart;
-      const parsedOutput = completion.choices[0]?.message.parsed;
+      const rawContent = completion.choices[0]?.message.content;
 
-      if (!parsedOutput) {
-        console.error('[LLM Engine] Erro: Output não parseado. Raw content:', completion.choices[0]?.message.content);
-        throw new Error('Falha no parsing estruturado do output LLM.');
+      if (!rawContent) {
+        throw new Error('OpenAI retornou conteúdo vazio.');
       }
 
-      console.log(`[LLM Engine] Resposta recebida em ${llmDuration}ms. Action: ${parsedOutput.next_action}`);
+      const parsedOutput = ConversationTurnOutputSchema.parse(JSON.parse(rawContent));
+      console.log(`[LLM Engine] Resposta processada em ${llmDuration}ms. Action: ${parsedOutput.next_action}`);
       return parsedOutput;
     } catch (error: any) {
       console.error('[LLM Engine] Erro de API/Parsing:', error);
@@ -79,11 +97,9 @@ ${phaseInstructions}
       // Detalhar o erro se for timeout ou limite de taxa
       const isTimeout = error.code === 'ETIMEDOUT' || error.name === 'TimeoutError';
       
-      // Fallback estruturado
+      // Fallback estruturado com erro visível para debug
       return {
-        assistant_text: isTimeout 
-          ? "A ligação à inteligência central expirou. Podes tentar novamente?" 
-          : "Tive uma falha técnica ao processar a tua resposta. Podes repetir?",
+        assistant_text: `[FALLBACK ENGINE] Erro: ${error.message || 'Erro desconhecido'}. Raw: ${error.toString()}`,
         user_input_interpretation: "Erro Engine: " + (error.message || 'Unknown'),
         understanding_status: "insufficient",
         next_action: "clarify",
