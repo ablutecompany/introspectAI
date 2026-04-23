@@ -14,7 +14,7 @@
  * Mostra feedback gentil se a resposta for fraca — sem bloquear brutalmente.
  */
 
-import { useState } from 'react';
+import { useState, useEffect } from 'react';
 import { useSessionStore } from '../../store/useSessionStore';
 import { classifyProgressDelta } from '../../engine/reentry/deltaEngine';
 import { decideCaseAdjustment, buildWorkingDirectionLine } from '../../engine/reentry/caseAdjustmentEngine';
@@ -45,7 +45,6 @@ export function FollowUpFlow() {
   const [llmTurnCount, setLlmTurnCount] = useState(0);
 
   // Primeira renderização: ir buscar a pergunta inicial do LLM
-  import { useEffect } from 'react';
   useEffect(() => {
      let mounted = true;
      const fetchInitialQuestion = async () => {
