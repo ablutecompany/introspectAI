@@ -67,12 +67,55 @@ export default function App() {
     )
   );
 
+  const renderDebugShortcut = () => {
+    const isLocalhost = window.location.hostname === 'localhost' || window.location.hostname === '127.0.0.1';
+    const isVercelPreview = window.location.hostname.includes('vercel.app') && !window.location.hostname.startsWith('introspect.ai');
+    
+    if (!isLocalhost && !isVercelPreview) return null;
+
+    return (
+      <button 
+        onClick={() => {
+           const state = useSessionStore.getState();
+           state.startFreshCase();
+           state.updateCaseMemory({
+               currentFocus: 'Ansiedade com prazos de entrega no trabalho',
+               provisionalHypothesis: 'Perfeccionismo a bloquear a execução e a gerar paralisia',
+               lastExtractedMeaning: 'O utilizador sente um peso enorme quando se aproximam deadlines, acabando por não fazer nada por medo de falhar.',
+               salientTerms: ['paralisia', 'prazo', 'medo', 'bloqueio']
+           });
+           state.updateState({
+               phase: 'CONTINUATION_ACTIVE',
+               sessionStage: 'EXPLORATION',
+               continuationState: {
+                   outputPayload: {
+                       title: '[DEBUG] Atalho de Exploração',
+                       mainText: 'O motor foi inicializado com o contexto de ansiedade e prazos de entrega.',
+                       optionalPrompt: 'O que te parece a hipótese do perfeccionismo estar a gerar paralisia perante o deadline?'
+                   },
+                   continuationResolved: false,
+                   turnsUsedInMode: 0
+               }
+           });
+        }}
+        style={{
+          position: 'absolute', bottom: 16, right: 16, padding: '8px 16px', borderRadius: 8,
+          background: 'rgba(59, 130, 246, 0.2)', color: '#60a5fa', fontSize: '0.8rem', border: '1px solid rgba(59, 130, 246, 0.3)', cursor: 'pointer',
+          zIndex: 9999
+        }}
+      >
+        [Dev] Fast-Forward para EXPLORATION
+      </button>
+    );
+  };
+
   // ─── Render: REENTRADA (caso retomável no mesmo browser) ────────────────────
   // Mostrado antes da triagem, se existir caso válido persistido.
   if (phase === 'TRIAGE' && resumeAvailable) {
     return (
       <div style={{ minHeight: '100vh', background: 'var(--bg-color)', position: 'relative' }}>
         {renderVoiceToggle()}
+        {renderDebugShortcut()}
         <ReentryGate
           onContinue={() => {
             continueExistingCase();
@@ -105,6 +148,7 @@ export default function App() {
     return (
       <div style={{ minHeight: '100vh', background: 'var(--bg-color)', position: 'relative' }}>
         {renderVoiceToggle()}
+        {renderDebugShortcut()}
         <TriageFlow onComplete={handleTriageComplete} />
       </div>
     );
@@ -112,7 +156,6 @@ export default function App() {
 
   // ─── Render: READING (Provisória ou Emergente) ──────────────────────────────
   if (phase === 'LATENT_READING_DISPLAY') {
-    if (!triageState) return null;
     const currentState = useSessionStore.getState();
 
     // Sprint 4: Tentar gerar leitura emergente se o caso tiver maturidade
@@ -218,13 +261,25 @@ export default function App() {
   // ─── Render: CONTINUATION & CLOSE ───────────────────────────────────────────
   if (phase === 'CONTINUATION_ACTIVE' || phase === 'CLOSE_NOW') {
     const p = continuationState?.outputPayload;
-    if (!p) return null;
+    if (!p) {
+       return (
+         <div style={{ minHeight: '100vh', background: 'var(--bg-color)', display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
+           <div style={{ textAlign: 'center', padding: '2rem' }}>
+             <p style={{ color: 'var(--text-muted)' }}>Ocorreu um erro no carregamento da fase seguinte.</p>
+             <button className="btn-secondary" style={{ marginTop: 16 }} onClick={() => useSessionStore.getState().startFreshCase()}>
+               Recomeçar
+             </button>
+           </div>
+         </div>
+       );
+    }
 
     const requiresInteraction = p.optionalPrompt && !continuationState.shouldCloseAfterThisTurn;
 
     // A resposta encerra a aplicação liminarmente (Bypass de Loops Infinitos LLM)
     const submitResponse = async (shortcutMode?: 'close' | 'refute') => {
        const userText = inputText.trim() || transcript.trim();
+       useSessionStore.getState().saveSnapshot(userText);
 
        const forceCloseSession = (reasonText: string) => {
           setTimeout(() => {
@@ -406,6 +461,24 @@ export default function App() {
                         </button>
                     </div>
                 </div>
+
+                {useSessionStore.getState().lastTurnSnapshot && (
+                  <div style={{ width: '100%', textAlign: 'center', marginTop: 12 }}>
+                    <button 
+                      className="btn-secondary" 
+                      disabled={isProcessing}
+                      onClick={() => {
+                        const text = useSessionStore.getState().restoreSnapshot();
+                        if (text !== null) {
+                          setInputText(text);
+                        }
+                      }}
+                      style={{ fontSize: '0.8rem', color: 'var(--text-muted)', border: '1px dashed var(--border-color)', background: 'transparent' }}
+                    >
+                      ↩ Voltar e corrigir a resposta anterior
+                    </button>
+                  </div>
+                )}
 
                 {transcript && (
                   <div style={{ width: '100%', background: '#f8fafc', padding: 12, borderRadius: 8, border: '1px solid #e2e8f0', fontSize: '0.85rem' }}>

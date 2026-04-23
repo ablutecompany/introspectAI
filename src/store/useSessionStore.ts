@@ -335,6 +335,33 @@ export const useSessionStore = create<SessionStore>()(
          sessionMeta: { ...state.sessionMeta, updatedAt: now() }
       })),
 
+      // ─── Bugfix: Rewind 1 step ───────────────────────────────────────────────
+      saveSnapshot: (userText) => set((state) => {
+        const { lastTurnSnapshot, lastTurnUserText, ...stateToSave } = state;
+        return {
+           lastTurnSnapshot: JSON.stringify(stateToSave),
+           lastTurnUserText: userText
+        };
+      }),
+
+      restoreSnapshot: () => {
+        const state = useSessionStore.getState();
+        if (!state.lastTurnSnapshot) return null;
+        try {
+          const parsed = JSON.parse(state.lastTurnSnapshot);
+          const userText = state.lastTurnUserText;
+          set({
+            ...parsed,
+            lastTurnSnapshot: null,
+            lastTurnUserText: null
+          });
+          return userText;
+        } catch (e) {
+          console.error("Failed to restore snapshot", e);
+          return null;
+        }
+      },
+
       // ─── Sprint 8: Reset real + Clarificação ─────────────────────────────────
 
       /**

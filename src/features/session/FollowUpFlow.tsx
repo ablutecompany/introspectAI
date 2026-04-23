@@ -106,6 +106,9 @@ export function FollowUpFlow() {
     const trimmedAnswer = inputText.trim();
     const currentTag = `llm_turn_${llmTurnCount}`;
 
+    // Bugfix: guardar snapshot
+    useSessionStore.getState().saveSnapshot(trimmedAnswer);
+
     recordProgressSignal(`[reentrada:${currentTag}] ${trimmedAnswer}`);
     markMeaningfulInteraction();
 
@@ -375,6 +378,28 @@ export function FollowUpFlow() {
           <p style={{ margin: 0, fontSize: '0.75rem', color: 'var(--text-muted)', textAlign: 'center' }}>
             Podes saltar se não há nada novo a dizer.
           </p>
+          
+          {useSessionStore.getState().lastTurnSnapshot && (
+            <div style={{ width: '100%', textAlign: 'center', marginTop: 12 }}>
+              <button 
+                className="btn-secondary" 
+                disabled={isProcessing}
+                onClick={() => {
+                  const text = useSessionStore.getState().restoreSnapshot();
+                  if (text !== null) {
+                    setInputText(text);
+                    // Como a submissão no FollowUp avança contadores, repomos a tag e corpus manualmente:
+                    setAnsweredTags(prev => prev.slice(0, -1));
+                    setAnswerCorpus(prev => prev.slice(0, -1));
+                    setLlmTurnCount(prev => Math.max(0, prev - 1));
+                  }
+                }}
+                style={{ fontSize: '0.8rem', color: 'var(--text-muted)', border: '1px dashed var(--border-color)', background: 'transparent' }}
+              >
+                ↩ Voltar e corrigir a resposta anterior
+              </button>
+            </div>
+          )}
         </div>
       </div>
     </div>
