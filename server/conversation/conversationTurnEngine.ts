@@ -4,7 +4,7 @@ import {
   ConversationTurnOutputSchema, 
   type ConversationTurnOutput, 
   type ConversationTurnRequest 
-} from '../../src/shared/contracts/conversationTurnContract';
+} from '../../src/shared/contracts/conversationTurnContract.js';
 
 /**
  * ConversationTurnEngine
@@ -50,7 +50,7 @@ ${phaseInstructions}
 `.trim();
 
     try {
-      const completion = await this.openai.beta.chat.completions.parse({
+      const completion = await (this.openai.beta as any).chat.completions.parse({
         model: 'gpt-4o-mini',
         messages: [
           { role: 'system', content: systemPrompt },

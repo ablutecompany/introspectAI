@@ -1,6 +1,6 @@
 import type { VercelRequest, VercelResponse } from '@vercel/node';
-import { ConversationTurnEngine } from '../server/conversation/conversationTurnEngine';
-import type { ConversationTurnRequest } from '../src/shared/contracts/conversationTurnContract';
+import { ConversationTurnEngine } from '../server/conversation/conversationTurnEngine.js';
+import type { ConversationTurnRequest } from '../src/shared/contracts/conversationTurnContract.js';
 
 const engine = new ConversationTurnEngine();
 
