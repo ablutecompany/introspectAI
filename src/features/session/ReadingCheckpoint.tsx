@@ -48,22 +48,70 @@ export const ReadingCheckpoint: React.FC<Props> = ({ onProceed }) => {
 
   // ─── Phase: Partial Imput ──────────────────────────────────────────────────
 
-  const submitPartial = () => {
+  const submitPartial = async () => {
     if (!inputText.trim()) return;
     setIsProcessing(true);
 
-    // Sprint 9: Assimilar a correção e decidir estrago feito
     const stateSnapshot = useSessionStore.getState();
-    const semantic = assimilateInputSemantic(inputText, 'free', stateSnapshot);
+    let useFallback = false;
 
-    const isHardCorrection = semantic.category === 'correction' || semantic.category === 'disagreement';
-    
-    // Adicionamos a clarificação aos truth signals e registamos notas
-    updateCaseMemory({
-      progressSignals: [...(caseMemory.progressSignals ?? []), `Correção Parcial: ${inputText.trim()}`],
-      // Se for hard correction, apagamos a provisória
-      ...(isHardCorrection ? { provisionalHypothesis: null, confidenceState: 'insufficient' as const } : {})
-    });
+    try {
+        const reqPayload = {
+            sessionStage: 'READING_CHECKPOINT',
+            currentFocus: stateSnapshot.caseMemory.currentFocus || null,
+            provisionalHypothesis: stateSnapshot.caseMemory.provisionalHypothesis || null,
+            caseMemory: stateSnapshot.caseMemory,
+            lastUserInput: inputText.trim(),
+            workingDirection: null,
+            lastAssistantMove: 'O que bate e o que não bate na leitura?',
+            checkpointState: phase,
+            correctionHistory: []
+        };
+        const res = await fetch('/api/conversationTurn', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify(reqPayload)
+        });
+
+        if (!res.ok) throw new Error('API Error');
+        const turnResult = await res.json();
+
+        const isHardCorrection = turnResult.detectedIntent === 'correction' || turnResult.detectedIntent === 'disagreement';
+
+        const memoryUpdate: Partial<typeof caseMemory> = {
+           progressSignals: [...(caseMemory.progressSignals ?? []), `Correção Parcial via LLM: ${inputText.trim()}`]
+        };
+
+        if (isHardCorrection) {
+            memoryUpdate.confidenceState = 'insufficient';
+            memoryUpdate.correctionNote = 'Correção parcial registada pelo LLM';
+            if (turnResult.updatedFocus) memoryUpdate.currentFocus = turnResult.updatedFocus;
+            if (turnResult.updatedHypothesis) {
+                memoryUpdate.provisionalHypothesis = turnResult.updatedHypothesis;
+            } else {
+                memoryUpdate.provisionalHypothesis = null;
+            }
+        }
+
+        updateCaseMemory(memoryUpdate);
+
+    } catch(err) {
+        console.warn('LLM API falhou no checkpoint, fallback para local', err);
+        useFallback = true;
+    }
+
+    if (useFallback) {
+        // Sprint 9: Assimilar a correção e decidir estrago feito
+        const semantic = assimilateInputSemantic(inputText, 'free', stateSnapshot);
+        const isHardCorrection = semantic.category === 'correction' || semantic.category === 'disagreement';
+        
+        // Adicionamos a clarificação aos truth signals e registamos notas
+        updateCaseMemory({
+          progressSignals: [...(caseMemory.progressSignals ?? []), `Correção Parcial: ${inputText.trim()}`],
+          // Se for hard correction, apagamos a provisória
+          ...(isHardCorrection ? { provisionalHypothesis: null, confidenceState: 'insufficient' as const } : {})
+        });
+    }
 
     // Avançamos para o continuation engine
     setTimeout(() => {

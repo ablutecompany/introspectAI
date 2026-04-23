@@ -225,90 +225,177 @@ export default function App() {
     const requiresInteraction = p.optionalPrompt && !continuationState.shouldCloseAfterThisTurn;
 
     // A resposta encerra a aplicação liminarmente (Bypass de Loops Infinitos LLM)
-    const submitResponse = (shortcutMode?: 'close' | 'refute') => {
+    const submitResponse = async (shortcutMode?: 'close' | 'refute') => {
        const userText = inputText.trim() || transcript.trim();
 
-       // Sprint 9: Assimilação Semântica e Tratamento Consequente
+       // Sprint 11: LLM-driven Turn (com Fallback)
        if (!shortcutMode && userText) {
+          setIsProcessing(true);
           const currentState = useSessionStore.getState();
-          const semantic = assimilateInputSemantic(userText, 'free', currentState);
+          let useFallback = false;
 
-          if (semantic.category === 'vague_escape' || semantic.category === 'too_short') {
-              alert('Preciso de um pouco mais de detalhe. Se preferires não avançar, podes fechar a sessão ou dizer que não queres responder.');
-              return;
+          try {
+              const reqPayload = {
+                  sessionStage: currentState.sessionStage,
+                  currentFocus: currentState.caseMemory.currentFocus || null,
+                  provisionalHypothesis: currentState.caseMemory.provisionalHypothesis || null,
+                  caseMemory: currentState.caseMemory,
+                  lastUserInput: userText,
+                  workingDirection: null,
+                  lastAssistantMove: p.optionalPrompt || p.mainText,
+                  checkpointState: null,
+                  correctionHistory: []
+              };
+
+              const res = await fetch('/api/conversationTurn', {
+                  method: 'POST',
+                  headers: { 'Content-Type': 'application/json' },
+                  body: JSON.stringify(reqPayload)
+              });
+
+              if (!res.ok) throw new Error('API Error');
+              const turnResult = await res.json();
+
+              // LLM needs clarification or detected vague
+              if (turnResult.needsClarification) {
+                  if (turnResult.detectedIntent === 'vague' || turnResult.detectedIntent === 'too_short') {
+                      alert('Preciso de um pouco mais de detalhe. Se preferires não avançar, podes fechar a sessão ou dizer que não queres responder.');
+                      setIsProcessing(false);
+                      return;
+                  }
+                  
+                  const intentTag = continuationState?.outputPayload?._discriminationIntentTag ?? 'generic';
+                  useSessionStore.getState().updateClarificationState(intentTag);
+                  
+                  // Update optional prompt with clarification text
+                  updateState({
+                     continuationState: {
+                         ...continuationState!,
+                         outputPayload: {
+                             ...continuationState!.outputPayload!,
+                             optionalPrompt: turnResult.clarificationText || "Podes detalhar um pouco mais?"
+                         }
+                     }
+                  });
+                  setInputText('');
+                  setIsProcessing(false);
+                  return;
+              }
+
+              if (turnResult.closeNow || turnResult.detectedIntent === 'refusal') {
+                  shortcutMode = 'close';
+              }
+
+              // Update case memory from LLM extractions
+              const memoryUpdate: Partial<typeof currentState.caseMemory> = {};
+              if (turnResult.updatedFocus) memoryUpdate.currentFocus = turnResult.updatedFocus;
+              if (turnResult.updatedHypothesis) memoryUpdate.provisionalHypothesis = turnResult.updatedHypothesis;
+
+              if (turnResult.detectedIntent === 'correction' || turnResult.detectedIntent === 'disagreement') {
+                  memoryUpdate.lastCorrectionSignal = userText;
+                  memoryUpdate.correctionNote = 'Correção via LLM';
+                  memoryUpdate.confidenceState = 'insufficient';
+
+                  if (turnResult.updatedFocus) {
+                      memoryUpdate.provisionalHypothesis = null;
+                  }
+                  shortcutMode = 'refute';
+              }
+
+              if (Object.keys(memoryUpdate).length > 0) {
+                  useSessionStore.getState().updateCaseMemory(memoryUpdate);
+              }
+
+              // Force target stage if requested
+              if (turnResult.targetStage) {
+                  setIsProcessing(false);
+                  updateState({
+                     phase: turnResult.targetStage === 'CLOSE_NOW' ? 'CLOSE_NOW' : 'CONTINUATION_ACTIVE',
+                     sessionStage: turnResult.targetStage as any
+                  });
+                  return;
+              }
+
+          } catch (err) {
+              console.warn('LLM API falhou, fallback para motor semântico local', err);
+              useFallback = true;
           }
 
-          if (semantic.category === 'confusion') {
-            const intentTag = continuationState?.outputPayload?._discriminationIntentTag ?? 'generic';
-            const clarification = buildClarification(intentTag, currentState);
-            
-            // Marca a tentativa no store
-            useSessionStore.getState().updateClarificationState(intentTag);
-            
-            if (!clarification.canClarifyAgain) {
-                 // Fecho honesto se esgotou
-                 setIsProcessing(true);
-                 setTimeout(() => {
-                    updateState({ phase: 'CLOSE_NOW', sessionStage: 'CLOSE_NOW' });
-                    setIsProcessing(false);
-                 }, 600);
-                 return;
-            }
+          if (useFallback) {
+              // ─── LÓGICA LOCAL (FALLBACK SPRINT 9/10) ─────────────────────────
+              const semantic = assimilateInputSemantic(userText, 'free', currentState);
 
-            // Atualiza localmente a pergunta opcional 
-            updateState({
-               continuationState: {
-                   ...continuationState!,
-                   outputPayload: {
-                       ...continuationState!.outputPayload!,
-                       optionalPrompt: clarification.reformulatedQuestion
+              if (semantic.category === 'vague_escape' || semantic.category === 'too_short') {
+                  alert('Preciso de um pouco mais de detalhe. Se preferires não avançar, podes fechar a sessão ou dizer que não queres responder.');
+                  setIsProcessing(false);
+                  return;
+              }
+
+              if (semantic.category === 'confusion') {
+                const intentTag = continuationState?.outputPayload?._discriminationIntentTag ?? 'generic';
+                const clarification = buildClarification(intentTag, currentState);
+                
+                useSessionStore.getState().updateClarificationState(intentTag);
+                
+                if (!clarification.canClarifyAgain) {
+                     setTimeout(() => {
+                        updateState({ phase: 'CLOSE_NOW', sessionStage: 'CLOSE_NOW' });
+                        setIsProcessing(false);
+                     }, 600);
+                     return;
+                }
+
+                updateState({
+                   continuationState: {
+                       ...continuationState!,
+                       outputPayload: {
+                           ...continuationState!.outputPayload!,
+                           optionalPrompt: clarification.reformulatedQuestion
+                       }
                    }
-               }
-            });
-            setInputText(''); // limpa a textArea
-            return;
-          }
-          
-          if (semantic.category === 'refusal') {
-            shortcutMode = 'close';
-          }
-          
-          // Sprint 10: Guardar extrações úteis gerais no CaseMemory
-          if (semantic.salientTerms?.length || semantic.userPhrasingFragments?.length || semantic.extractedMeaning) {
-            const memoryUpdate: Partial<typeof currentState.caseMemory> = {};
-            if (semantic.extractedMeaning) memoryUpdate.lastExtractedMeaning = semantic.extractedMeaning;
-            if (semantic.salientTerms?.length) {
-              const currentTerms = currentState.caseMemory.salientTerms || [];
-              memoryUpdate.salientTerms = Array.from(new Set([...currentTerms, ...semantic.salientTerms]));
-            }
-            if (semantic.userPhrasingFragments?.length) {
-              const currentFrags = currentState.caseMemory.userPhrasingFragments || [];
-              memoryUpdate.userPhrasingFragments = Array.from(new Set([...currentFrags, ...semantic.userPhrasingFragments]));
-            }
-            useSessionStore.getState().updateCaseMemory(memoryUpdate);
-          }
-          
-          if (semantic.category === 'correction' || semantic.category === 'disagreement') {
-            // Sprint 10B: A correção passa a ter consequência real
-            const memoryUpdate: Partial<typeof currentState.caseMemory> = {
-                lastCorrectionSignal: userText,
-                correctionNote: semantic.extractedMeaning || 'Correção vaga sem substituto claro',
-                confidenceState: 'insufficient' // Reduz confiança dado que a hipótese anterior não serviu
-            };
+                });
+                setInputText(''); 
+                setIsProcessing(false);
+                return;
+              }
+              
+              if (semantic.category === 'refusal') {
+                shortcutMode = 'close';
+              }
+              
+              if (semantic.salientTerms?.length || semantic.userPhrasingFragments?.length || semantic.extractedMeaning) {
+                const memoryUpdate: Partial<typeof currentState.caseMemory> = {};
+                if (semantic.extractedMeaning) memoryUpdate.lastExtractedMeaning = semantic.extractedMeaning;
+                if (semantic.salientTerms?.length) {
+                  const currentTerms = currentState.caseMemory.salientTerms || [];
+                  memoryUpdate.salientTerms = Array.from(new Set([...currentTerms, ...semantic.salientTerms]));
+                }
+                if (semantic.userPhrasingFragments?.length) {
+                  const currentFrags = currentState.caseMemory.userPhrasingFragments || [];
+                  memoryUpdate.userPhrasingFragments = Array.from(new Set([...currentFrags, ...semantic.userPhrasingFragments]));
+                }
+                useSessionStore.getState().updateCaseMemory(memoryUpdate);
+              }
+              
+              if (semantic.category === 'correction' || semantic.category === 'disagreement') {
+                const memoryUpdate: Partial<typeof currentState.caseMemory> = {
+                    lastCorrectionSignal: userText,
+                    correctionNote: semantic.extractedMeaning || 'Correção vaga sem substituto claro',
+                    confidenceState: 'insufficient'
+                };
 
-            // Se houver um substituto claro, aplicamos
-            if (semantic.candidateFocusShift) {
-                memoryUpdate.currentFocus = semantic.candidateFocusShift;
-                memoryUpdate.provisionalHypothesis = null; // Limpa para forçar re-avaliação do novo foco
-            } else if (semantic.candidateHypothesisShift) {
-                memoryUpdate.provisionalHypothesis = semantic.candidateHypothesisShift;
-            } else {
-                // Correção vaga: apenas destruímos a hipótese para não teimar, mas preservamos o foco genérico
-                memoryUpdate.provisionalHypothesis = null;
-            }
+                if (semantic.candidateFocusShift) {
+                    memoryUpdate.currentFocus = semantic.candidateFocusShift;
+                    memoryUpdate.provisionalHypothesis = null;
+                } else if (semantic.candidateHypothesisShift) {
+                    memoryUpdate.provisionalHypothesis = semantic.candidateHypothesisShift;
+                } else {
+                    memoryUpdate.provisionalHypothesis = null;
+                }
 
-            useSessionStore.getState().updateCaseMemory(memoryUpdate);
-            shortcutMode = 'refute';
+                useSessionStore.getState().updateCaseMemory(memoryUpdate);
+                shortcutMode = 'refute';
+              }
           }
        }
 

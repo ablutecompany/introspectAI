@@ -23,6 +23,7 @@ import { validateMinimumResponse } from '../../engine/validation/responseValidat
 import { decideContinuationMode } from '../../engine/continuation/continuationEngine';
 import { inferReadingStageFromMemory } from '../../engine/emergentReadingEngine';
 import type { FollowUpQuestion } from '../../engine/reentry/reentryEngine';
+import type { ConversationTurnOutput, ConversationTurnRequest } from '../../shared/contracts/conversationTurnContract';
 
 export function FollowUpFlow() {
   const updateState = useSessionStore((s) => s.updateState);
@@ -32,61 +33,152 @@ export function FollowUpFlow() {
   const updateProgressDelta = useSessionStore((s) => s.updateProgressDelta);
   const applyFollowUpInference = useSessionStore((s) => s.applyFollowUpInference);
 
-  // Tags das perguntas já respondidas nesta sessão de reentrada
   const [answeredTags, setAnsweredTags] = useState<string[]>([]);
-  // Respostas brutas (na mesma ordem que answeredTags) — para o deltaEngine
   const [answerCorpus, setAnswerCorpus] = useState<string[]>([]);
   const [inputText, setInputText] = useState('');
   const [validationFeedback, setValidationFeedback] = useState<string | null>(null);
   const [isTransitioning, setIsTransitioning] = useState(false);
   const [transitionLine, setTransitionLine] = useState<string | null>(null);
+  
+  // Sprint 11: LLM-driven follow-up
+  const [isProcessing, setIsProcessing] = useState(false);
+  const [dynamicQuestionText, setDynamicQuestionText] = useState<string | null>(null);
+  const [useFallback, setUseFallback] = useState(false);
+  const [llmTurnCount, setLlmTurnCount] = useState(0);
 
-  // Pergunta atual (determinística baseada no estado do store)
-  const currentQuestion: FollowUpQuestion | null = pickNextFollowUpQuestion(
+  // Primeira renderização: ir buscar a pergunta inicial do LLM
+  import { useEffect } from 'react';
+  useEffect(() => {
+     let mounted = true;
+     const fetchInitialQuestion = async () => {
+         setIsProcessing(true);
+         try {
+             const state = useSessionStore.getState();
+             const reqPayload: ConversationTurnRequest = {
+                 sessionStage: 'FOLLOW_UP_REENTRY',
+                 currentFocus: state.caseMemory.currentFocus || null,
+                 provisionalHypothesis: state.caseMemory.provisionalHypothesis || null,
+                 caseMemory: state.caseMemory,
+                 lastUserInput: "Inicie a retoma do caso de forma natural e contextualizada com o resumo anterior.",
+                 workingDirection: null,
+                 lastAssistantMove: null,
+                 checkpointState: null,
+                 correctionHistory: []
+             };
+             const res = await fetch('/api/conversationTurn', {
+                 method: 'POST',
+                 headers: { 'Content-Type': 'application/json' },
+                 body: JSON.stringify(reqPayload)
+             });
+             if (!res.ok) throw new Error('API Error');
+             const turnResult: ConversationTurnOutput = await res.json();
+             if (mounted) {
+                 setDynamicQuestionText(turnResult.assistantText);
+                 setIsProcessing(false);
+             }
+         } catch (err) {
+             console.warn('LLM falhou no mount, fallback para fluxo local', err);
+             if (mounted) {
+                 setUseFallback(true);
+                 setIsProcessing(false);
+             }
+         }
+     };
+     fetchInitialQuestion();
+     return () => { mounted = false; };
+  }, []);
+
+  const fallbackQuestion: FollowUpQuestion | null = pickNextFollowUpQuestion(
     useSessionStore.getState(),
     answeredTags
   );
 
-  /**
-   * Submete a resposta à pergunta atual.
-   * Valida primeiro; só avança se houver conteúdo semântico real.
-   */
-  const handleSubmit = () => {
-    if (!currentQuestion) return;
+  const displayQuestionText = dynamicQuestionText ?? fallbackQuestion?.questionText;
+
+  const handleSubmit = async () => {
+    if (!displayQuestionText || isProcessing) return;
 
     const validation = validateMinimumResponse(inputText, 'follow_up');
 
     if (!validation.isValid) {
-      // Feedback gentil — não bloqueia, mostra uma vez
-      // Se já foi mostrado feedback antes, deixar passar (não punir em loop)
       if (!validationFeedback) {
         setValidationFeedback(validation.feedbackMessage);
         return;
       }
-      // Segunda tentativa com resposta fraca: aceitar e avançar sem penalidade
     }
 
-    // Resposta aceite (válida ou segunda tentativa)
     setValidationFeedback(null);
+    setIsProcessing(true);
     const trimmedAnswer = inputText.trim();
+    const currentTag = fallbackQuestion?.tag || `llm_turn_${llmTurnCount}`;
 
-    // Guardar resposta como progressSignal (prefixada com tag para rastreabilidade)
-    recordProgressSignal(`[reentrada:${currentQuestion.tag}] ${trimmedAnswer}`);
-    markMeaningfulInteraction(); // Sprint 6: ligar aqui também
+    recordProgressSignal(`[reentrada:${currentTag}] ${trimmedAnswer}`);
+    markMeaningfulInteraction();
 
-    const nextAnswered = [...answeredTags, currentQuestion.tag];
+    const nextAnswered = [...answeredTags, currentTag];
     const nextCorpus = [...answerCorpus, trimmedAnswer];
     setAnsweredTags(nextAnswered);
     setAnswerCorpus(nextCorpus);
     setInputText('');
 
-    // Verificar se há mais perguntas
-    const nextQ = pickNextFollowUpQuestion(useSessionStore.getState(), nextAnswered);
+    if (!useFallback) {
+      try {
+        const state = useSessionStore.getState();
+        const reqPayload: ConversationTurnRequest = {
+          sessionStage: 'FOLLOW_UP_REENTRY',
+          currentFocus: state.caseMemory.currentFocus || null,
+          provisionalHypothesis: state.caseMemory.provisionalHypothesis || null,
+          caseMemory: state.caseMemory,
+          lastUserInput: trimmedAnswer,
+          workingDirection: null,
+          lastAssistantMove: displayQuestionText,
+          checkpointState: null,
+          correctionHistory: [] // Simplificado por enquanto
+        };
 
-    if (!nextQ) {
-      // Todas as perguntas respondidas — calcular delta e transitar
-      handleCompleteReentry(nextAnswered, nextCorpus);
+        const res = await fetch('/api/conversationTurn', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify(reqPayload)
+        });
+
+        if (!res.ok) throw new Error('API Error');
+
+        const turnResult: ConversationTurnOutput = await res.json();
+        
+        // Atualizações de memória
+        const memoryUpdate: any = {};
+        if (turnResult.updatedFocus) memoryUpdate.currentFocus = turnResult.updatedFocus;
+        if (turnResult.updatedHypothesis) memoryUpdate.provisionalHypothesis = turnResult.updatedHypothesis;
+        
+        if (Object.keys(memoryUpdate).length > 0) {
+            useSessionStore.getState().updateCaseMemory(memoryUpdate);
+        }
+
+        setLlmTurnCount(prev => prev + 1);
+
+        if (turnResult.nextMove === 'proceed' || turnResult.closeNow || llmTurnCount >= 2) {
+           handleCompleteReentry(nextAnswered, nextCorpus, turnResult.targetStage);
+        } else {
+           setDynamicQuestionText(turnResult.needsClarification ? (turnResult.clarificationText || turnResult.assistantText) : turnResult.assistantText);
+        }
+        setIsProcessing(false);
+        return;
+      } catch (err) {
+        console.warn('LLM falhou no turno, fallback para fluxo local', err);
+        setUseFallback(true);
+      }
     }
+
+    // Fluxo Fallback / Original
+    const nextQ = pickNextFollowUpQuestion(useSessionStore.getState(), nextAnswered);
+    if (!nextQ) {
+      handleCompleteReentry(nextAnswered, nextCorpus);
+    } else {
+      setDynamicQuestionText(null); // Volta a usar o fallback local
+    }
+    
+    setIsProcessing(false);
   };
 
   /**
@@ -101,7 +193,7 @@ export function FollowUpFlow() {
    * Calcula delta + ajuste, guarda no CaseMemory, e transita para CONTINUATION_ACTIVE.
    * Sprint 6: o ponto de integração central dos dois novos motores.
    */
-  const handleCompleteReentry = (finalAnsweredTags: string[], responses: string[]) => {
+  const handleCompleteReentry = (finalAnsweredTags: string[], responses: string[], overrideTargetStage?: string | null) => {
     setIsTransitioning(true);
 
     setTimeout(() => {
@@ -128,12 +220,12 @@ export function FollowUpFlow() {
         const correctStage = inferReadingStageFromMemory(updatedState.caseMemory);
         const contState = decideContinuationMode(updatedState);
 
-        const targetPhase = updatedState.triageState ? 'CONTINUATION_ACTIVE' : 'TRIAGE';
-        const targetStage = updatedState.triageState ? correctStage : 'ENTRY_ORIENTATION';
+        const targetPhase = overrideTargetStage ? 'CONTINUATION_ACTIVE' : (updatedState.triageState ? 'CONTINUATION_ACTIVE' : 'TRIAGE');
+        const finalStage = overrideTargetStage || (updatedState.triageState ? correctStage : 'ENTRY_ORIENTATION');
 
         updateState({
-          phase: targetPhase,
-          sessionStage: targetStage,
+          phase: targetPhase as any, // fallback for typing if needed
+          sessionStage: finalStage as any,
           continuationState: updatedState.triageState ? contState : updatedState.continuationState,
         });
       }, 1800); // tempo suficiente para ler a linha de transição
@@ -168,7 +260,7 @@ export function FollowUpFlow() {
   }
 
   // ─── Render: sem mais perguntas (não devia acontecer, mas por segurança) ─────
-  if (!currentQuestion) {
+  if (!displayQuestionText && !isProcessing) {
     handleCompleteReentry(answeredTags, answerCorpus);
     return null;
   }
@@ -222,7 +314,7 @@ export function FollowUpFlow() {
             margin: 0,
             fontWeight: 500,
           }}>
-            {currentQuestion.questionText}
+            {displayQuestionText || "A carregar..."}
           </h1>
         </div>
 
@@ -271,10 +363,10 @@ export function FollowUpFlow() {
               id="btn-submit-followup"
               className="btn-primary"
               onClick={handleSubmit}
-              disabled={!inputText.trim()}
-              style={{ flex: 1, minWidth: 140 }}
+              disabled={!inputText.trim() || isProcessing}
+              style={{ flex: 1, minWidth: 140, opacity: isProcessing ? 0.7 : 1 }}
             >
-              Continuar
+              {isProcessing ? 'A pensar...' : 'Continuar'}
             </button>
             <button
               id="btn-skip-followup"
