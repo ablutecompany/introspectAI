@@ -9,10 +9,8 @@ import { decideContinuationMode } from '../engine/continuation/continuationEngin
 import { inferSessionStageFromLegacyPhase } from '../engine/session/phaseCompatibility';
 import { buildDiscriminationQuestion, interpretDiscriminationAnswer } from '../engine/session/discriminationEngine';
 import { buildEmergentReading, inferReadingStageFromMemory } from '../engine/emergentReadingEngine';
-import { assimilateInputSemantic } from '../engine/semantic/semanticAssimilationEngine';
-import { buildClarification } from '../engine/clarification/clarificationEngine';
-import { ReadingCheckpoint } from '../features/session/ReadingCheckpoint';
 import type { TriageState } from '../types/internalState';
+import type { ConversationTurnOutput, ConversationTurnRequest } from '../shared/contracts/conversationTurnContract';
 import './index.css';
 
 export default function App() {
@@ -228,233 +226,123 @@ export default function App() {
     const submitResponse = async (shortcutMode?: 'close' | 'refute') => {
        const userText = inputText.trim() || transcript.trim();
 
-       // Sprint 11: LLM-driven Turn (com Fallback)
-       if (!shortcutMode && userText) {
-          setIsProcessing(true);
-          const currentState = useSessionStore.getState();
-          let useFallback = false;
+       const forceCloseSession = (reasonText: string) => {
+          setTimeout(() => {
+            const forceCloseState = decideContinuationMode({
+               ...useSessionStore.getState(),
+               governance: { ...useSessionStore.getState().governance, shouldCloseNow: true, lastGovernanceReason: reasonText },
+               continuationState: {
+                  ...useSessionStore.getState().continuationState,
+                  continuationResolved: true,
+                  turnsUsedInMode: 1
+               }
+            });
+            
+            updateState({ 
+               phase: 'CLOSE_NOW', 
+               sessionStage: inferSessionStageFromLegacyPhase('CLOSE_NOW'),
+               continuationState: forceCloseState 
+            });
+            
+            setInputText('');
+            setIsProcessing(false);
+          }, 300);
+       };
 
-          try {
-              const reqPayload = {
-                  sessionStage: currentState.sessionStage,
-                  currentFocus: currentState.caseMemory.currentFocus || null,
-                  provisionalHypothesis: currentState.caseMemory.provisionalHypothesis || null,
-                  caseMemory: currentState.caseMemory,
-                  lastUserInput: userText,
-                  workingDirection: null,
-                  lastAssistantMove: p.optionalPrompt || p.mainText,
-                  checkpointState: null,
-                  correctionHistory: []
-              };
-
-              const res = await fetch('/api/conversationTurn', {
-                  method: 'POST',
-                  headers: { 'Content-Type': 'application/json' },
-                  body: JSON.stringify(reqPayload)
-              });
-
-              if (!res.ok) throw new Error('API Error');
-              const turnResult = await res.json();
-
-              // LLM needs clarification or detected vague
-              if (turnResult.needsClarification) {
-                  if (turnResult.detectedIntent === 'vague' || turnResult.detectedIntent === 'too_short') {
-                      alert('Preciso de um pouco mais de detalhe. Se preferires não avançar, podes fechar a sessão ou dizer que não queres responder.');
-                      setIsProcessing(false);
-                      return;
-                  }
-                  
-                  const intentTag = continuationState?.outputPayload?._discriminationIntentTag ?? 'generic';
-                  useSessionStore.getState().updateClarificationState(intentTag);
-                  
-                  // Update optional prompt with clarification text
-                  updateState({
-                     continuationState: {
-                         ...continuationState!,
-                         outputPayload: {
-                             ...continuationState!.outputPayload!,
-                             optionalPrompt: turnResult.clarificationText || "Podes detalhar um pouco mais?"
-                         }
-                     }
-                  });
-                  setInputText('');
-                  setIsProcessing(false);
-                  return;
-              }
-
-              if (turnResult.closeNow || turnResult.detectedIntent === 'refusal') {
-                  shortcutMode = 'close';
-              }
-
-              // Update case memory from LLM extractions
-              const memoryUpdate: Partial<typeof currentState.caseMemory> = {};
-              if (turnResult.updatedFocus) memoryUpdate.currentFocus = turnResult.updatedFocus;
-              if (turnResult.updatedHypothesis) memoryUpdate.provisionalHypothesis = turnResult.updatedHypothesis;
-
-              if (turnResult.detectedIntent === 'correction' || turnResult.detectedIntent === 'disagreement') {
-                  memoryUpdate.lastCorrectionSignal = userText;
-                  memoryUpdate.correctionNote = 'Correção via LLM';
-                  memoryUpdate.confidenceState = 'insufficient';
-
-                  if (turnResult.updatedFocus) {
-                      memoryUpdate.provisionalHypothesis = null;
-                  }
-                  shortcutMode = 'refute';
-              }
-
-              if (Object.keys(memoryUpdate).length > 0) {
-                  useSessionStore.getState().updateCaseMemory(memoryUpdate);
-              }
-
-              // Force target stage if requested
-              if (turnResult.targetStage) {
-                  setIsProcessing(false);
-                  updateState({
-                     phase: turnResult.targetStage === 'CLOSE_NOW' ? 'CLOSE_NOW' : 'CONTINUATION_ACTIVE',
-                     sessionStage: turnResult.targetStage as any
-                  });
-                  return;
-              }
-
-          } catch (err) {
-              console.warn('LLM API falhou, fallback para motor semântico local', err);
-              useFallback = true;
-          }
-
-          if (useFallback) {
-              // ─── LÓGICA LOCAL (FALLBACK SPRINT 9/10) ─────────────────────────
-              const semantic = assimilateInputSemantic(userText, 'free', currentState);
-
-              if (semantic.category === 'vague_escape' || semantic.category === 'too_short') {
-                  alert('Preciso de um pouco mais de detalhe. Se preferires não avançar, podes fechar a sessão ou dizer que não queres responder.');
-                  setIsProcessing(false);
-                  return;
-              }
-
-              if (semantic.category === 'confusion') {
-                const intentTag = continuationState?.outputPayload?._discriminationIntentTag ?? 'generic';
-                const clarification = buildClarification(intentTag, currentState);
-                
-                useSessionStore.getState().updateClarificationState(intentTag);
-                
-                if (!clarification.canClarifyAgain) {
-                     setTimeout(() => {
-                        updateState({ phase: 'CLOSE_NOW', sessionStage: 'CLOSE_NOW' });
-                        setIsProcessing(false);
-                     }, 600);
-                     return;
-                }
-
-                updateState({
-                   continuationState: {
-                       ...continuationState!,
-                       outputPayload: {
-                           ...continuationState!.outputPayload!,
-                           optionalPrompt: clarification.reformulatedQuestion
-                       }
-                   }
-                });
-                setInputText(''); 
-                setIsProcessing(false);
-                return;
-              }
-              
-              if (semantic.category === 'refusal') {
-                shortcutMode = 'close';
-              }
-              
-              if (semantic.salientTerms?.length || semantic.userPhrasingFragments?.length || semantic.extractedMeaning) {
-                const memoryUpdate: Partial<typeof currentState.caseMemory> = {};
-                if (semantic.extractedMeaning) memoryUpdate.lastExtractedMeaning = semantic.extractedMeaning;
-                if (semantic.salientTerms?.length) {
-                  const currentTerms = currentState.caseMemory.salientTerms || [];
-                  memoryUpdate.salientTerms = Array.from(new Set([...currentTerms, ...semantic.salientTerms]));
-                }
-                if (semantic.userPhrasingFragments?.length) {
-                  const currentFrags = currentState.caseMemory.userPhrasingFragments || [];
-                  memoryUpdate.userPhrasingFragments = Array.from(new Set([...currentFrags, ...semantic.userPhrasingFragments]));
-                }
-                useSessionStore.getState().updateCaseMemory(memoryUpdate);
-              }
-              
-              if (semantic.category === 'correction' || semantic.category === 'disagreement') {
-                const memoryUpdate: Partial<typeof currentState.caseMemory> = {
-                    lastCorrectionSignal: userText,
-                    correctionNote: semantic.extractedMeaning || 'Correção vaga sem substituto claro',
-                    confidenceState: 'insufficient'
-                };
-
-                if (semantic.candidateFocusShift) {
-                    memoryUpdate.currentFocus = semantic.candidateFocusShift;
-                    memoryUpdate.provisionalHypothesis = null;
-                } else if (semantic.candidateHypothesisShift) {
-                    memoryUpdate.provisionalHypothesis = semantic.candidateHypothesisShift;
-                } else {
-                    memoryUpdate.provisionalHypothesis = null;
-                }
-
-                useSessionStore.getState().updateCaseMemory(memoryUpdate);
-                shortcutMode = 'refute';
-              }
-          }
+       if (shortcutMode === 'close' || shortcutMode === 'refute') {
+          forceCloseSession('Sessão encerrada pelo utilizador (' + shortcutMode + ').');
+          return;
        }
+
+       if (!userText) return;
 
        setIsProcessing(true);
        stopListening();
        stopSpeaking();
-       
-       setTimeout(() => {
-          let reasonText = 'Sessão concluída após input.';
-          if (shortcutMode === 'refute') reasonText = 'Sessão encerrada (hipótese descartada pelo utilizador).';
 
-          // Sprint 3: Registar a resposta discriminadora antes do fecho
-          // Se esta fase tinha uma pergunta com intentTag, interpretar a resposta
-          const currentState = useSessionStore.getState();
-          const intentTag = continuationState?.outputPayload?._discriminationIntentTag;
-          if (intentTag && currentState.triageState) {
-            const discriminationQ = buildDiscriminationQuestion(currentState);
-            if (discriminationQ && discriminationQ.intentTag === intentTag) {
-              const rawAnswer = shortcutMode === 'refute'
-                ? '' // refutação explícita = sem confirmação
-                : userText;
-              const memoryUpdate = interpretDiscriminationAnswer(currentState, discriminationQ, rawAnswer);
-              updateCaseMemory(memoryUpdate);
-              // Sprint 6: marcar interação significativa quando há resposta discriminadora real
-              if (rawAnswer && shortcutMode !== 'refute') {
-                markMeaningfulInteraction();
+       const currentState = useSessionStore.getState();
+
+       try {
+           const reqPayload: ConversationTurnRequest = {
+               sessionStage: 'EXPLORATION',
+               caseSummary: currentState.caseMemory.lastExtractedMeaning || 'Resumo indisponível.',
+               currentFocus: currentState.caseMemory.currentFocus || null,
+               currentHypothesis: currentState.caseMemory.provisionalHypothesis || null,
+               lastUserInput: userText,
+               lastAssistantTurn: p.optionalPrompt || p.mainText,
+               checkpointState: null,
+               conversationDepth: currentState.sessionMeta.turnCount,
+               previousCorrections: [],
+               salientTerms: currentState.caseMemory.salientTerms || []
+           };
+
+           const res = await fetch('/api/conversationTurn', {
+               method: 'POST',
+               headers: { 'Content-Type': 'application/json' },
+               body: JSON.stringify(reqPayload)
+           });
+
+           if (!res.ok) throw new Error('API Error');
+           const turnResult: ConversationTurnOutput = await res.json();
+
+           const memoryUpdate: Partial<typeof currentState.caseMemory> = {};
+           if (turnResult.updated_focus) memoryUpdate.currentFocus = turnResult.updated_focus;
+           if (turnResult.updated_hypothesis) memoryUpdate.provisionalHypothesis = turnResult.updated_hypothesis;
+           
+           if (turnResult.understanding_status === 'disagreement' || turnResult.user_input_interpretation.includes('correction')) {
+               memoryUpdate.lastCorrectionSignal = userText;
+               memoryUpdate.correctionNote = 'Correção via LLM';
+               memoryUpdate.confidenceState = 'insufficient';
+           }
+
+           if (Object.keys(memoryUpdate).length > 0) {
+               useSessionStore.getState().updateCaseMemory(memoryUpdate);
+           }
+
+           markMeaningfulInteraction();
+
+           if (turnResult.close_session) {
+               forceCloseSession('Sessão fechada após análise LLM.');
+               return;
+           }
+
+           if (turnResult.next_action === 'proceed' || turnResult.checkpoint_signal || turnResult.target_stage === 'READING_CHECKPOINT') {
+               updateState({ 
+                   phase: 'LATENT_READING_DISPLAY', 
+                   sessionStage: 'READING_CHECKPOINT'
+               });
+               setInputText('');
+               setIsProcessing(false);
+               return;
+           }
+
+           updateState({
+              continuationState: {
+                  ...continuationState!,
+                  outputPayload: {
+                      ...continuationState!.outputPayload!,
+                      optionalPrompt: turnResult.needs_clarification ? (turnResult.clarification_text || turnResult.assistant_text) : turnResult.assistant_text
+                  }
               }
-              // Actualizar sessionStage para DISCRIMINATIVE_EXPLORATION quando registamos discriminação
-              if (!useSessionStore.getState().caseMemory.discriminationRecord?.length) {
-                setSessionStage('DISCRIMINATIVE_EXPLORATION');
+           });
+           
+           setInputText('');
+           setIsProcessing(false);
+
+       } catch (err) {
+           console.warn('LLM API falhou, fallback estático', err);
+           updateState({
+              continuationState: {
+                  ...continuationState!,
+                  outputPayload: {
+                      ...continuationState!.outputPayload!,
+                      optionalPrompt: "Tive uma falha de rede. Podes repetir ou tentar fechar a sessão se preferires."
+                  }
               }
-            }
-          }
-
-          // Sprint 6: marcar interação significativa quando o utilizador submeteu resposta real
-          // (não em cancel/refute — esses são encerramento, não material clínico)
-          if (!shortcutMode && userText) {
-            markMeaningfulInteraction();
-          }
-
-          const forceCloseState = decideContinuationMode({
-             ...useSessionStore.getState(),
-             governance: { ...useSessionStore.getState().governance, shouldCloseNow: true, lastGovernanceReason: reasonText },
-             continuationState: {
-                ...useSessionStore.getState().continuationState,
-                continuationResolved: true,
-                turnsUsedInMode: 1
-             }
-          });
-          
-          updateState({ 
-             phase: 'CLOSE_NOW', 
-             sessionStage: inferSessionStageFromLegacyPhase('CLOSE_NOW'),
-             continuationState: forceCloseState 
-          });
-          
-          setInputText('');
-          setIsProcessing(false);
-       }, 500);
+           });
+           setInputText('');
+           setIsProcessing(false);
+       }
     };
 
     return (

@@ -16,13 +16,11 @@
 
 import { useState } from 'react';
 import { useSessionStore } from '../../store/useSessionStore';
-import { pickNextFollowUpQuestion } from '../../engine/reentry/reentryEngine';
 import { classifyProgressDelta } from '../../engine/reentry/deltaEngine';
 import { decideCaseAdjustment, buildWorkingDirectionLine } from '../../engine/reentry/caseAdjustmentEngine';
 import { validateMinimumResponse } from '../../engine/validation/responseValidator';
 import { decideContinuationMode } from '../../engine/continuation/continuationEngine';
 import { inferReadingStageFromMemory } from '../../engine/emergentReadingEngine';
-import type { FollowUpQuestion } from '../../engine/reentry/reentryEngine';
 import type { ConversationTurnOutput, ConversationTurnRequest } from '../../shared/contracts/conversationTurnContract';
 
 export function FollowUpFlow() {
@@ -55,15 +53,16 @@ export function FollowUpFlow() {
          try {
              const state = useSessionStore.getState();
              const reqPayload: ConversationTurnRequest = {
-                 sessionStage: 'FOLLOW_UP_REENTRY',
+                 sessionStage: 'REENTRY',
+                 caseSummary: state.caseMemory.lastExtractedMeaning || 'Resumo indisponível',
                  currentFocus: state.caseMemory.currentFocus || null,
-                 provisionalHypothesis: state.caseMemory.provisionalHypothesis || null,
-                 caseMemory: state.caseMemory,
+                 currentHypothesis: state.caseMemory.provisionalHypothesis || null,
                  lastUserInput: "Inicie a retoma do caso de forma natural e contextualizada com o resumo anterior.",
-                 workingDirection: null,
-                 lastAssistantMove: null,
+                 lastAssistantTurn: null,
                  checkpointState: null,
-                 correctionHistory: []
+                 conversationDepth: 0,
+                 previousCorrections: [],
+                 salientTerms: state.caseMemory.salientTerms || []
              };
              const res = await fetch('/api/conversationTurn', {
                  method: 'POST',
@@ -73,13 +72,14 @@ export function FollowUpFlow() {
              if (!res.ok) throw new Error('API Error');
              const turnResult: ConversationTurnOutput = await res.json();
              if (mounted) {
-                 setDynamicQuestionText(turnResult.assistantText);
+                 setDynamicQuestionText(turnResult.assistant_text);
                  setIsProcessing(false);
              }
          } catch (err) {
-             console.warn('LLM falhou no mount, fallback para fluxo local', err);
+             console.warn('LLM falhou no mount, fallback para mensagem estática', err);
              if (mounted) {
                  setUseFallback(true);
+                 setDynamicQuestionText("Ocorreu um erro a carregar o contexto. Como te sentes hoje?");
                  setIsProcessing(false);
              }
          }
@@ -88,12 +88,7 @@ export function FollowUpFlow() {
      return () => { mounted = false; };
   }, []);
 
-  const fallbackQuestion: FollowUpQuestion | null = pickNextFollowUpQuestion(
-    useSessionStore.getState(),
-    answeredTags
-  );
-
-  const displayQuestionText = dynamicQuestionText ?? fallbackQuestion?.questionText;
+  const displayQuestionText = dynamicQuestionText;
 
   const handleSubmit = async () => {
     if (!displayQuestionText || isProcessing) return;
@@ -110,7 +105,7 @@ export function FollowUpFlow() {
     setValidationFeedback(null);
     setIsProcessing(true);
     const trimmedAnswer = inputText.trim();
-    const currentTag = fallbackQuestion?.tag || `llm_turn_${llmTurnCount}`;
+    const currentTag = `llm_turn_${llmTurnCount}`;
 
     recordProgressSignal(`[reentrada:${currentTag}] ${trimmedAnswer}`);
     markMeaningfulInteraction();
@@ -125,15 +120,16 @@ export function FollowUpFlow() {
       try {
         const state = useSessionStore.getState();
         const reqPayload: ConversationTurnRequest = {
-          sessionStage: 'FOLLOW_UP_REENTRY',
+          sessionStage: 'REENTRY',
+          caseSummary: state.caseMemory.lastExtractedMeaning || 'Resumo indisponível',
           currentFocus: state.caseMemory.currentFocus || null,
-          provisionalHypothesis: state.caseMemory.provisionalHypothesis || null,
-          caseMemory: state.caseMemory,
+          currentHypothesis: state.caseMemory.provisionalHypothesis || null,
           lastUserInput: trimmedAnswer,
-          workingDirection: null,
-          lastAssistantMove: displayQuestionText,
+          lastAssistantTurn: displayQuestionText,
           checkpointState: null,
-          correctionHistory: [] // Simplificado por enquanto
+          conversationDepth: llmTurnCount + 1,
+          previousCorrections: [], 
+          salientTerms: state.caseMemory.salientTerms || []
         };
 
         const res = await fetch('/api/conversationTurn', {
@@ -146,10 +142,10 @@ export function FollowUpFlow() {
 
         const turnResult: ConversationTurnOutput = await res.json();
         
-        // Atualizações de memória
+        // Atualizações de memória baseadas na extração do LLM
         const memoryUpdate: any = {};
-        if (turnResult.updatedFocus) memoryUpdate.currentFocus = turnResult.updatedFocus;
-        if (turnResult.updatedHypothesis) memoryUpdate.provisionalHypothesis = turnResult.updatedHypothesis;
+        if (turnResult.updated_focus) memoryUpdate.currentFocus = turnResult.updated_focus;
+        if (turnResult.updated_hypothesis) memoryUpdate.provisionalHypothesis = turnResult.updated_hypothesis;
         
         if (Object.keys(memoryUpdate).length > 0) {
             useSessionStore.getState().updateCaseMemory(memoryUpdate);
@@ -157,28 +153,19 @@ export function FollowUpFlow() {
 
         setLlmTurnCount(prev => prev + 1);
 
-        if (turnResult.nextMove === 'proceed' || turnResult.closeNow || llmTurnCount >= 2) {
-           handleCompleteReentry(nextAnswered, nextCorpus, turnResult.targetStage);
+        if (turnResult.next_action === 'proceed' || turnResult.close_session || turnResult.checkpoint_signal || llmTurnCount >= 3) {
+           handleCompleteReentry(nextAnswered, nextCorpus, turnResult.target_stage);
         } else {
-           setDynamicQuestionText(turnResult.needsClarification ? (turnResult.clarificationText || turnResult.assistantText) : turnResult.assistantText);
+           setDynamicQuestionText(turnResult.needs_clarification ? (turnResult.clarification_text || turnResult.assistant_text) : turnResult.assistant_text);
         }
         setIsProcessing(false);
-        return;
       } catch (err) {
-        console.warn('LLM falhou no turno, fallback para fluxo local', err);
+        console.warn('LLM Network falhou no turno, fallback estático', err);
+        setDynamicQuestionText("A ligação falhou. Se preferires, podes simplesmente saltar esta fase.");
         setUseFallback(true);
+        setIsProcessing(false);
       }
     }
-
-    // Fluxo Fallback / Original
-    const nextQ = pickNextFollowUpQuestion(useSessionStore.getState(), nextAnswered);
-    if (!nextQ) {
-      handleCompleteReentry(nextAnswered, nextCorpus);
-    } else {
-      setDynamicQuestionText(null); // Volta a usar o fallback local
-    }
-    
-    setIsProcessing(false);
   };
 
   /**

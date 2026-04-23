@@ -23,28 +23,30 @@ export class ConversationTurnEngine {
   }
 
   public async processTurn(request: ConversationTurnRequest): Promise<ConversationTurnOutput> {
+    const phaseInstructions = this.getPhaseInstructions(request.sessionStage);
+
     const systemPrompt = `
 És o motor conversacional central de uma app de exploração psicológica bounded.
 Não assumes o papel de chatbot livre. Lês o estado atual, avalias o input do utilizador e determinas a progressão.
 
 ESTADO ATUAL:
 - Session Stage: ${request.sessionStage}
+- Case Summary: ${request.caseSummary || 'Nenhum'}
 - Current Focus: ${request.currentFocus || 'Nenhum'}
-- Provisional Hypothesis: ${request.provisionalHypothesis || 'Nenhuma'}
-- Working Direction: ${request.workingDirection || 'Nenhuma'}
-- Last Assistant Move: ${request.lastAssistantMove || 'Nenhum'}
-- Correções passadas nesta sessão: ${request.correctionHistory.length > 0 ? request.correctionHistory.join(' | ') : 'Nenhum registo'}
+- Current Hypothesis: ${request.currentHypothesis || 'Nenhuma'}
+- Last Assistant Turn: ${request.lastAssistantTurn || 'Nenhum'}
+- Correções passadas nesta sessão: ${request.previousCorrections.length > 0 ? request.previousCorrections.join(' | ') : 'Nenhum registo'}
+- Termos salientes: ${request.salientTerms.length > 0 ? request.salientTerms.join(', ') : 'Nenhum'}
 
-INSTRUÇÕES (STRICT):
-1. Classifica a intenção (detectedIntent). Se o utilizador corrige o assistente, marca 'correction' ou 'disagreement'.
-2. Se houver correção válida e um novo foco/hipótese claro, atualiza-os (updatedFocus, updatedHypothesis).
-3. Produz o texto de resposta (assistantText) de forma curta, natural e em Português de Portugal (PT-PT). Sem banalidades ou linguagem coach.
-4. Se o input for evasivo ou inútil, didUnderstand=false e needsClarification=true (com clarificationText).
-5. nextMove:
-   - 'ask_more': ainda precisas de mais input para fechar a fase.
-   - 'proceed': consideras que tens material suficiente para a fase seguinte.
-   - 'close_now': o utilizador exigiu explicitamente encerrar.
-6. targetStage: Se a intenção do utilizador indicar inequivocamente que a fase atual deve ser ignorada para saltar para uma específica, preenche-o (raro). Caso contrário null.
+REGRAS GERAIS:
+1. Responde em Português de Portugal (PT-PT) natural e direto. Sem banalidades, sem estilo coach, sem diagnóstico formal.
+2. Faz no máximo UMA pergunta principal por turno. Não faças 3 perguntas de uma vez.
+3. Se houver discordância ou confusão por parte do utilizador, adapta-te imediatamente (understanding_status = 'disagreement' ou 'confused').
+4. Se precisares de clarificar antes de avançar, needs_clarification=true e fornece a clarification_text.
+5. Usa next_action ('ask_more', 'proceed', 'clarify', 'close_now') para guiar a FSM. Se já tiveres material suficiente, emite 'proceed' ou checkpoint_signal=true.
+
+INSTRUÇÕES ESPECÍFICAS DA FASE (${request.sessionStage}):
+${phaseInstructions}
 `.trim();
 
     try {
@@ -70,16 +72,37 @@ INSTRUÇÕES (STRICT):
       
       // Fallback estruturado para garantir bounded fail-safe
       return {
-        assistantText: "Tive uma falha de conexão e não consegui processar a última mensagem. Podes repetir?",
-        didUnderstand: false,
-        detectedIntent: 'vague',
-        updatedFocus: null,
-        updatedHypothesis: null,
-        needsClarification: true,
-        clarificationText: "Ocorreu um erro de rede. Queres tentar de novo?",
-        nextMove: 'ask_more',
-        closeNow: false,
+        assistant_text: "Tive uma falha de conexão e não consegui processar a última mensagem. Podes repetir?",
+        user_input_interpretation: "Erro na API",
+        understanding_status: "insufficient",
+        next_action: "clarify",
+        target_stage: null,
+        updated_focus: null,
+        updated_hypothesis: null,
+        needs_clarification: true,
+        clarification_text: "Ocorreu um erro de rede. Queres tentar de novo?",
+        checkpoint_signal: false,
+        close_session: false,
+        suggested_ui_mode: 'warning',
+        suggested_shortcuts: ['Tentar novamente']
       };
+    }
+  }
+
+  private getPhaseInstructions(stage: string): string {
+    switch (stage) {
+      case 'TRIAGE':
+        return "- O objetivo é captar o problema base de forma rápida.\n- Pergunta sobre o sintoma principal.\n- Se sentires que já tens a 'dor' principal mapeada, usa next_action = 'proceed'.";
+      case 'REENTRY':
+        return "- O utilizador está a voltar de uma pausa ou rejeitou a leitura anterior.\n- Reconecta com empatia e tenta perceber o que falhou na fase anterior.\n- Atualiza o focus e hypothesis rapidamente.";
+      case 'EXPLORATION':
+        return "- A fase principal. Explora o contexto, gatilhos e padrões.\n- Aprofunda a hypothesis. Quando sentires que a hypothesis é sólida e cobriste os pontos fundamentais, define checkpoint_signal=true.";
+      case 'CHECKPOINT':
+        return "- Estamos num momento de validação. O utilizador acabou de ler um insight.\n- Pergunta apenas como lhe soa a leitura. Se discordar, ajusta. Se concordar, usa next_action = 'proceed'.";
+      case 'CLOSING':
+        return "- A conversa está a terminar.\n- Consolida o que foi descoberto, sugere um passo muito simples e fecha (close_session=true) se o utilizador concordar.";
+      default:
+        return "- Mantém a conversa fluída e ajusta-te ao utilizador.";
     }
   }
 }
