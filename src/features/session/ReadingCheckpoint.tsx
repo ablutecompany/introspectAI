@@ -57,15 +57,16 @@ export const ReadingCheckpoint: React.FC<Props> = ({ onProceed }) => {
 
     try {
         const reqPayload = {
-            sessionStage: 'READING_CHECKPOINT',
+            sessionStage: 'CHECKPOINT',
+            caseSummary: stateSnapshot.caseMemory.provisionalHypothesis || 'Correção parcial na leitura',
             currentFocus: stateSnapshot.caseMemory.currentFocus || null,
-            provisionalHypothesis: stateSnapshot.caseMemory.provisionalHypothesis || null,
-            caseMemory: stateSnapshot.caseMemory,
+            currentHypothesis: stateSnapshot.caseMemory.provisionalHypothesis || null,
             lastUserInput: inputText.trim(),
-            workingDirection: null,
-            lastAssistantMove: 'O que bate e o que não bate na leitura?',
+            lastAssistantTurn: 'O que bate e o que não bate na leitura?',
             checkpointState: phase,
-            correctionHistory: []
+            conversationDepth: stateSnapshot.caseMemory.progressSignals?.length || 0,
+            previousCorrections: [],
+            salientTerms: []
         };
         const res = await fetch('/api/conversationTurn', {
             method: 'POST',
@@ -76,7 +77,7 @@ export const ReadingCheckpoint: React.FC<Props> = ({ onProceed }) => {
         if (!res.ok) throw new Error('API Error');
         const turnResult = await res.json();
 
-        const isHardCorrection = turnResult.detectedIntent === 'correction' || turnResult.detectedIntent === 'disagreement';
+        const isHardCorrection = turnResult.understanding_status === 'disagreement' || turnResult.understanding_status === 'confused';
 
         const memoryUpdate: Partial<typeof caseMemory> = {
            progressSignals: [...(caseMemory.progressSignals ?? []), `Correção Parcial via LLM: ${inputText.trim()}`]
@@ -85,9 +86,9 @@ export const ReadingCheckpoint: React.FC<Props> = ({ onProceed }) => {
         if (isHardCorrection) {
             memoryUpdate.confidenceState = 'insufficient';
             memoryUpdate.correctionNote = 'Correção parcial registada pelo LLM';
-            if (turnResult.updatedFocus) memoryUpdate.currentFocus = turnResult.updatedFocus;
-            if (turnResult.updatedHypothesis) {
-                memoryUpdate.provisionalHypothesis = turnResult.updatedHypothesis;
+            if (turnResult.updated_focus) memoryUpdate.currentFocus = turnResult.updated_focus;
+            if (turnResult.updated_hypothesis) {
+                memoryUpdate.provisionalHypothesis = turnResult.updated_hypothesis;
             } else {
                 memoryUpdate.provisionalHypothesis = null;
             }
