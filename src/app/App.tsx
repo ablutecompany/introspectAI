@@ -33,7 +33,7 @@ export default function App() {
 
   const [inputText, setInputText] = useState('');
   const [isProcessing, setIsProcessing] = useState(false);
-    const [llmStatus, setLlmStatus] = useState<'IDLE' | 'READY' | 'ERROR' | 'FALLBACK'>('IDLE');
+    const [llmStatus, setLlmStatus] = useState<'IDLE' | 'READY' | 'ERROR' | 'FALLBACK' | 'ENV_MISSING' | 'API_ERROR'>('IDLE');
   const [showTranscriptInput, setShowTranscriptInput] = useState(false);
 
   // Derivados simples de UI de Voz
@@ -345,7 +345,18 @@ export default function App() {
                 throw new Error('API Error ' + res.status + ': ' + (errData.error || 'Unknown')); 
             }
            const turnResult: ConversationTurnOutput = await res.json();
-            setLlmStatus('READY');
+           
+           if (turnResult.assistant_text.includes("[FALLBACK ENGINE]")) {
+               if (turnResult.assistant_text.includes("OPENAI_API_KEY")) {
+                   setLlmStatus('ENV_MISSING');
+               } else if (turnResult.assistant_text.includes("completions") || turnResult.assistant_text.includes("parse")) {
+                   setLlmStatus('API_ERROR');
+               } else {
+                   setLlmStatus('FALLBACK');
+               }
+           } else {
+               setLlmStatus('READY');
+           }
 
            const memoryUpdate: Partial<typeof currentState.caseMemory> = {};
            if (turnResult.updated_focus) memoryUpdate.currentFocus = turnResult.updated_focus;
@@ -423,7 +434,7 @@ export default function App() {
                     fontWeight: 700, 
                     padding: '4px 8px', 
                     borderRadius: 4, 
-                    background: llmStatus === 'READY' ? '#22c55e' : llmStatus === 'ERROR' ? '#ef4444' : llmStatus === 'FALLBACK' ? '#f59e0b' : '#64748b',
+                    background: llmStatus === 'READY' ? '#22c55e' : (llmStatus === 'ERROR' || llmStatus === 'API_ERROR' || llmStatus === 'ENV_MISSING') ? '#ef4444' : llmStatus === 'FALLBACK' ? '#f59e0b' : '#64748b',
                     color: '#fff'
                   }}>
                     MOTOR: {llmStatus}

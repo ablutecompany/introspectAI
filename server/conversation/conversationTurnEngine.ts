@@ -17,7 +17,9 @@ export class ConversationTurnEngine {
   private openai: OpenAI;
 
   constructor(apiKey?: string) {
-    this.openai = new OpenAI({
+    // Solução robusta para ESM/CJS interop em serverless runtimes
+    const OpenAIClass = (OpenAI as any).default || OpenAI;
+    this.openai = new OpenAIClass({
       apiKey: apiKey || process.env.OPENAI_API_KEY,
     });
   }
