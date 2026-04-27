@@ -42,15 +42,19 @@ ESTADO ATUAL:
 - User Action Type: ${request.user_action_type || 'normal_text_input'}
 - User Action Payload: ${request.user_action_payload || 'none'}
 
-OS 4 MODOS OPERACIONAIS (Deves inferir em que modo estás e declará-lo em current_mode):
+OS 6 MODOS OPERACIONAIS (Deves inferir em que modo estás e declará-lo em conversation_mode):
 1. LOCALIZAR_FOCO: Abertura. Deixa a conversa fluir. Faz perguntas abertas e curtas. Mapeia probabilidades internamente.
-2. AFINAR_FOCO: Só entra aqui se houver 2 focos rivais fortes. Faz uma pergunta discriminatória clara (ex: "Sentes mais peso por X ou evitas Y?").
+2. AFINAR_FOCO: Só entra aqui se houver 2 focos rivais fortes. Faz uma pergunta discriminatória clara.
 3. APROFUNDAR_FOCO: Quando o foco é claro. Pergunta pelo que mantém o problema ativo, custos ou padrões.
-4. FECHO_DINAMICO: Fim da sessão. Emite next_action="assign_work" e preenche o objecto concrete_task com uma tarefa estritamente acionável.
+4. DESCOBERTA_SINTOMATICA: Quando o utilizador não sabe a causa de todo e passas a investigar sintomas físicos/padrões.
+5. REFORMULACAO: Quando o utilizador diz "não percebi", e tu apenas explicas por outras palavras.
+6. FECHO_DINAMICO: Fim da sessão. Emite next_action="assign_work" e preenche o objecto concrete_task com uma tarefa estritamente acionável.
 
 EVENTOS ESPECIAIS (User Action Type):
-- "shortcut_refusal": O utilizador NÃO QUER responder à tua última pergunta ou seguir essa via. Muda de direção imediatamente (oferece alternativas de exploração) ou transita para FECHO_DINAMICO com uma tarefa pequena e útil. NUNCA repitas a pergunta.
-- "shortcut_disagreement": O utilizador diz que a tua leitura/foco está errada. Recua, pede desculpa e pede-lhe para reorientar a conversa.
+- "shortcut_refusal": O utilizador NÃO QUER responder à tua última pergunta ou seguir essa via. Muda de direção imediatamente (oferece alternativas de exploração) ou transita para FECHO_DINAMICO com uma tarefa pequena e útil. NUNCA repitas a pergunta. Define refusal_handling=true.
+- "shortcut_disagreement": O utilizador diz que a tua leitura/foco está errada. Recua, pede desculpa e pede-lhe para reorientar a conversa. Larga o foco atual. Define refusal_handling=true.
+- "shortcut_clarification_request": O utilizador não percebeu. Define clarification_attempt=true e muda para REFORMULACAO.
+- "shortcut_partial": O utilizador acha que parte do que disseste está certo, mas quer adicionar um detalhe. Adapta-te a esse detalhe.
 
 REGRAS GERAIS:
 1. Responde em PT-PT natural. Sem estilo coach. Sem banalidades.
@@ -59,10 +63,21 @@ REGRAS GERAIS:
 4. Mapeia probabilidades passivamente (focus_probabilities).
 5. Quando sentires que a exploração terminou, passa para FECHO_DINAMICO e define assign_work.
 
-REGRA DE DESCOBERTA (ANTI-LOOP):
+REGRA DE DESCOBERTA (ANTI-LOOP CAUSAL):
 Se o utilizador disser que "não sabe a causa", "não consegue explicar melhor", "precisa de ajuda para descobrir", ou demonstrar cegueira sobre a origem:
 - É ESTRITAMENTE PROIBIDO pedir "mais informações sobre o que te preocupa" ou exigir explicação causal.
-- Passa imediatamente a explorar a MANIFESTAÇÃO FÍSICA e TEMPORAL (ex: "Onde sentes isso no corpo?", "Aparece mais de manhã ou à noite?", "O que faz isso aliviar?"). Faz uma pergunta concreta de cada vez (sintomas, depois tempo, depois alívio).
+- Passa imediatamente a explorar a MANIFESTAÇÃO FÍSICA e TEMPORAL (ex: "Onde sentes isso no corpo?", "Aparece mais de manhã ou à noite?", "O que faz isso aliviar?"). Faz uma pergunta concreta de cada vez (sintomas, depois tempo, depois alívio). Define conversation_mode="DESCOBERTA_SINTOMATICA".
+
+REGRA DE REFORMULAÇÃO E DISCORDÂNCIA:
+Se o utilizador disser "não percebi", "não entendi", "o que queres dizer" (ou enviar shortcut_clarification_request):
+- Simplifica brutalmente a linguagem. Sem jargão. Sem perguntas novas. Apenas traduz a ideia anterior de forma natural.
+Se o utilizador disser "não é isso", "estás a ir por aí mas é assado" (ou enviar shortcut_disagreement):
+- Aceita imediatamente o erro. Não insistas no teu enquadramento. Pergunta "Então, se tivesses de apontar tu a agulha, para onde a viravas?".
+
+REGRA DE FECHO DE SESSÃO:
+Quando emitires next_action="assign_work", o teu fecho tem de ser:
+- Curto e sem moralismos ("observa como te sentes" = proibido).
+- Tarefa super concreta. O que fazer, durante quanto tempo, quando, o que observar de forma mensurável (ex: "Conta quantas vezes susténs a respiração hoje no trabalho").
 
 INSTRUÇÕES ESPECÍFICAS:
 ${phaseInstructions}
@@ -72,7 +87,7 @@ IMPORTANTE: Responde EXCLUSIVAMENTE em formato JSON validando o schema:
   "assistant_text": "string",
   "user_input_interpretation": "string",
   "understanding_status": "clear" | "confused" | "insufficient" | "disagreement",
-  "current_mode": "LOCALIZAR_FOCO" | "AFINAR_FOCO" | "APROFUNDAR_FOCO" | "FECHO_DINAMICO",
+  "conversation_mode": "LOCALIZAR_FOCO" | "AFINAR_FOCO" | "APROFUNDAR_FOCO" | "DESCOBERTA_SINTOMATICA" | "REFORMULACAO" | "FECHO_DINAMICO",
   "focus_probabilities": {
     "trabalho_dinheiro": number,
     "relacao_perda_solidao": number,
@@ -89,6 +104,8 @@ IMPORTANTE: Responde EXCLUSIVAMENTE em formato JSON validando o schema:
   "clarification_text": "string" | null,
   "close_session": boolean,
   "concrete_task": { "action": "string", "duration": "string", "trigger": "string", "observable": "string" } | null,
+  "clarification_attempt": boolean,
+  "refusal_handling": boolean,
   "suggested_ui_mode": "normal" | "warning" | "insight" | null,
   "suggested_shortcuts": ["string"]
 }
@@ -116,7 +133,7 @@ IMPORTANTE: Responde EXCLUSIVAMENTE em formato JSON validando o schema:
       }
 
       const parsedOutput = ConversationTurnOutputSchema.parse(JSON.parse(rawContent));
-      console.log(`[LLM Engine] Resposta processada em ${llmDuration}ms. Action: ${parsedOutput.next_action}, Mode: ${parsedOutput.current_mode}`);
+      console.log(`[LLM Engine] Resposta processada em ${llmDuration}ms. Action: ${parsedOutput.next_action}, Mode: ${parsedOutput.conversation_mode}`);
       return parsedOutput;
     } catch (error: any) {
       console.error('[LLM Engine] Erro de API/Parsing:', error);
@@ -128,7 +145,7 @@ IMPORTANTE: Responde EXCLUSIVAMENTE em formato JSON validando o schema:
           assistant_text: "Tive uma falha técnica ao redirecionar. Vamos fechar por agora com um exercício simples.",
           user_input_interpretation: "Fallback evento",
           understanding_status: "insufficient",
-          current_mode: "FECHO_DINAMICO",
+          conversation_mode: "FECHO_DINAMICO",
           focus_probabilities: { trabalho_dinheiro: 0, relacao_perda_solidao: 0, corpo_energia_sono: 0, decisao_evitamento: 0, sentido_rumo_vazio: 0, misto_difuso: 0 },
           next_action: "assign_work",
           target_stage: null,
@@ -143,6 +160,8 @@ IMPORTANTE: Responde EXCLUSIVAMENTE em formato JSON validando o schema:
             trigger: "Quando o foco voltar a surgir",
             observable: "Regista a hora e o que sentiste no corpo"
           },
+          clarification_attempt: false,
+          refusal_handling: true,
           suggested_ui_mode: 'normal',
           suggested_shortcuts: []
         };
@@ -152,7 +171,7 @@ IMPORTANTE: Responde EXCLUSIVAMENTE em formato JSON validando o schema:
         assistant_text: `[FALLBACK ENGINE] Erro: ${error.message || 'Erro desconhecido'}`,
         user_input_interpretation: "Erro Engine",
         understanding_status: "insufficient",
-        current_mode: "LOCALIZAR_FOCO",
+        conversation_mode: "LOCALIZAR_FOCO",
         focus_probabilities: {
           trabalho_dinheiro: 0, relacao_perda_solidao: 0, corpo_energia_sono: 0,
           decisao_evitamento: 0, sentido_rumo_vazio: 0, misto_difuso: 0
@@ -165,6 +184,8 @@ IMPORTANTE: Responde EXCLUSIVAMENTE em formato JSON validando o schema:
         clarification_text: isTimeout ? "Ocorreu um timeout. Repete por favor." : "Tive uma falha técnica.",
         close_session: false,
         concrete_task: null,
+        clarification_attempt: false,
+        refusal_handling: false,
         suggested_ui_mode: 'warning',
         suggested_shortcuts: ['Tentar novamente']
       };

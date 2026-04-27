@@ -6,7 +6,7 @@ export const ConversationTurnOutputSchema = z.object({
   user_input_interpretation: z.string()
     .describe('Uma breve análise (interna) sobre o que o utilizador quis realmente dizer.'),
   understanding_status: z.enum(['clear', 'confused', 'insufficient', 'disagreement']),
-  current_mode: z.enum(['LOCALIZAR_FOCO', 'AFINAR_FOCO', 'APROFUNDAR_FOCO', 'FECHO_DINAMICO'])
+  conversation_mode: z.enum(['LOCALIZAR_FOCO', 'AFINAR_FOCO', 'APROFUNDAR_FOCO', 'DESCOBERTA_SINTOMATICA', 'REFORMULACAO', 'FECHO_DINAMICO'])
     .describe('O modo de exploração atual em que o motor se encontra.'),
   focus_probabilities: z.object({
     trabalho_dinheiro: z.number().min(0).max(1),
@@ -32,6 +32,8 @@ export const ConversationTurnOutputSchema = z.object({
     trigger: z.string().describe('Quando o faz (ex: no fim do dia).'),
     observable: z.string().describe('O que vai observar/registar (ex: contar pedras).')
   }).nullable().describe('Tarefa operacional final. Preenchida apenas quando next_action é assign_work.'),
+  clarification_attempt: z.boolean().optional().describe('True se o motor está a tentar explicar-se/reformular após o utilizador dizer que não percebeu.'),
+  refusal_handling: z.boolean().optional().describe('True se o motor está a gerir uma recusa ou discordância do utilizador.'),
   suggested_ui_mode: z.enum(['normal', 'warning', 'insight']).nullable(),
   suggested_shortcuts: z.array(z.string()).describe('Até 3 sugestões curtas.')
 });

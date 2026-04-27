@@ -11,9 +11,6 @@
 
 import React, { useState } from 'react';
 import { useSessionStore } from '../../store/useSessionStore';
-import { buildClarification } from '../../engine/clarification/clarificationEngine';
-
-import { assimilateInputSemantic } from '../../engine/semantic/semanticAssimilationEngine';
 
 interface Props {
   onProceed: () => void;
@@ -22,51 +19,29 @@ interface Props {
 type CheckpointPhase = 'choice' | 'partial_input' | 'correction_choice' | 'clarification';
 
 export const ReadingCheckpoint: React.FC<Props> = ({ onProceed }) => {
-  const [phase, setPhase] = useState<CheckpointPhase>('choice');
+  const [phase, setPhase] = useState<'choice' | 'partial_input'>('choice');
   const [inputText, setInputText] = useState('');
   const [isProcessing, setIsProcessing] = useState(false);
 
-  const { caseMemory, updateCaseMemory, setSessionStage, updateState, updateClarificationState, startFreshCase } = useSessionStore();
+  const { caseMemory, updateCaseMemory, updateState } = useSessionStore();
 
-  const handleSim = () => {
-    onProceed(); // O App tratará de chamar o continuationEngine e avançar para CONTINUATION_ACTIVE
-  };
-
-  const handleParcialmente = () => {
-    setPhase('partial_input');
-  };
-
-  const handleNaoEBemIsto = () => {
-    setPhase('correction_choice');
-  };
-
-  const handleNaoPercebi = () => {
-    setPhase('clarification');
-    // Registar imediatamente para evitar loops
-    updateClarificationState('emergent_reading_check');
-  };
-
-  // ─── Phase: Partial Imput ──────────────────────────────────────────────────
-
-  const submitPartial = async () => {
-    if (!inputText.trim()) return;
+  const submitEventToLLM = async (actionType: string, payloadText: string = "") => {
     setIsProcessing(true);
-
     const stateSnapshot = useSessionStore.getState();
-    let useFallback = false;
 
     try {
         const reqPayload = {
             sessionStage: 'CHECKPOINT',
-            caseSummary: stateSnapshot.caseMemory.provisionalHypothesis || 'Correção parcial na leitura',
+            caseSummary: stateSnapshot.caseMemory.provisionalHypothesis || 'Feedback à leitura',
             currentFocus: stateSnapshot.caseMemory.currentFocus || null,
             currentHypothesis: stateSnapshot.caseMemory.provisionalHypothesis || null,
-            lastUserInput: inputText.trim(),
-            lastAssistantTurn: 'O que bate e o que não bate na leitura?',
+            lastUserInput: payloadText,
+            lastAssistantTurn: 'Isto bate certo com a realidade real?',
             checkpointState: phase,
             conversationDepth: stateSnapshot.caseMemory.progressSignals?.length || 0,
             previousCorrections: [],
-            salientTerms: []
+            salientTerms: [],
+            user_action_type: actionType
         };
         const res = await fetch('/api/conversationTurn', {
             method: 'POST',
@@ -77,79 +52,45 @@ export const ReadingCheckpoint: React.FC<Props> = ({ onProceed }) => {
         if (!res.ok) throw new Error('API Error');
         const turnResult = await res.json();
 
-        const isHardCorrection = turnResult.understanding_status === 'disagreement' || turnResult.understanding_status === 'confused';
-
-        const memoryUpdate: Partial<typeof caseMemory> = {
-           progressSignals: [...(caseMemory.progressSignals ?? []), `Correção Parcial via LLM: ${inputText.trim()}`]
-        };
-
-        if (isHardCorrection) {
-            memoryUpdate.confidenceState = 'insufficient';
-            memoryUpdate.correctionNote = 'Correção parcial registada pelo LLM';
-            if (turnResult.updated_focus) memoryUpdate.currentFocus = turnResult.updated_focus;
-            if (turnResult.updated_hypothesis) {
-                memoryUpdate.provisionalHypothesis = turnResult.updated_hypothesis;
-            } else {
-                memoryUpdate.provisionalHypothesis = null;
+        // Passa o texto do assistente gerado (ex: reformulação ou pedido de desculpa e redirecionamento)
+        // para abrir o ecrã Explorar logo a seguir de forma fluida.
+        updateState({
+            continuationState: {
+                ...stateSnapshot.continuationState!,
+                mode: null,
+                reason: null,
+                expectedValue: null,
+                maxTurnsInMode: 5,
+                turnsUsedInMode: 0,
+                continuationResolved: false,
+                failureFlags: [],
+                shouldCloseAfterThisTurn: false,
+                outputPayload: {
+                    title: 'Explorar',
+                    mainText: turnResult.assistant_text
+                }
             }
-        }
-
-        updateCaseMemory(memoryUpdate);
-
-    } catch(err) {
-        console.warn('LLM API falhou no checkpoint, fallback para local', err);
-        useFallback = true;
-    }
-
-    if (useFallback) {
-        // Sprint 9: Assimilar a correção e decidir estrago feito
-        const semantic = assimilateInputSemantic(inputText, 'free', stateSnapshot);
-        const isHardCorrection = semantic.category === 'correction' || semantic.category === 'disagreement';
-        
-        // Adicionamos a clarificação aos truth signals e registamos notas
-        updateCaseMemory({
-          progressSignals: [...(caseMemory.progressSignals ?? []), `Correção Parcial: ${inputText.trim()}`],
-          // Se for hard correction, apagamos a provisória
-          ...(isHardCorrection ? { provisionalHypothesis: null, confidenceState: 'insufficient' as const } : {})
         });
+    } catch(err) {
+        console.warn('LLM API falhou no checkpoint, avançando com fallback mudo', err);
     }
-
-    // Avançamos para o continuation engine
-    setTimeout(() => {
-      onProceed();
-    }, 400);
-  };
-
-  // ─── Phase: Correction Choice ──────────────────────────────────────────────
-
-  const handleCorrectionFocoCertoExplicacaoNao = () => {
-    // 1 - Manter a área e currentFocus, mas largar a hipótese e reduzir a confiança
-    updateCaseMemory({
-      provisionalHypothesis: null,
-      confidenceState: 'insufficient'
-    });
-    // Voltar o session stage para trás para permitir nova discriminação no App
+    
     onProceed();
   };
 
-  const handleCorrectionNemFocoCerto = () => {
-    // 2 - A leitura não bate mesmo. Limpa currentFocus e hipótese.
-    updateCaseMemory({
-      currentFocus: null,
-      provisionalHypothesis: null,
-      confidenceState: 'insufficient'
-    });
-    // O sistema fará triage no motor de continuação ou pedirá free text.
-    onProceed();
+  const handleSim = () => {
+    onProceed(); // Avança para Explorar com o texto default ("Por onde queres começar?") definido no App.tsx
   };
 
-  const handleCorrectionNaoSei = () => {
-    // 3 - Encerrar a sessão de forma honesta sem fingir maturidade.
-    const state = useSessionStore.getState();
-    updateState({
-       governance: { ...state.governance, shouldCloseNow: true, lastGovernanceReason: 'Falta de clareza inicial (abortado pelo utilizador).' }
-    });
-    onProceed();
+  const handleParcialmente = () => setPhase('partial_input');
+  
+  const handleNaoEBemIsto = () => submitEventToLLM('shortcut_disagreement');
+  
+  const handleNaoPercebi = () => submitEventToLLM('shortcut_clarification_request');
+
+  const submitPartial = () => {
+    if (!inputText.trim()) return;
+    submitEventToLLM('shortcut_partial', inputText.trim());
   };
 
   // ─── Renders ────────────────────────────────────────────────────────────────
@@ -177,74 +118,24 @@ export const ReadingCheckpoint: React.FC<Props> = ({ onProceed }) => {
     );
   }
 
-  if (phase === 'correction_choice') {
-    return (
-      <div style={containerStyle}>
-        <div className="splash" style={splashStyle}>
-          <h1 style={{ marginBottom: '1.5rem', fontSize: '1.4rem' }}>O que falhou na leitura?</h1>
-          <div style={{ display: 'flex', flexDirection: 'column', gap: 12, marginTop: 24, width: '100%' }}>
-            <button className="btn-secondary" style={wideBtnStyle} onClick={handleCorrectionFocoCertoExplicacaoNao}>
-              A zona da dor está certa — mas a explicação está errada
-            </button>
-            <button className="btn-secondary" style={wideBtnStyle} onClick={handleCorrectionNemFocoCerto}>
-              Nem os alicerces batem certo
-            </button>
-            <button className="btn-secondary" style={wideBtnStyle} onClick={handleCorrectionNaoSei}>
-              Não sei, mas não mexeu comigo
-            </button>
-            <button style={{ ...abandonBtnStyle, marginTop: 12 }} onClick={() => setPhase('choice')}>← Voltar</button>
-          </div>
-        </div>
-      </div>
-    );
-  }
-
-  if (phase === 'clarification') {
-    const currentState = useSessionStore.getState();
-    const clarification = buildClarification('emergent_reading_check', currentState);
-
-    if (!clarification.canClarifyAgain) {
-       return (
-        <div style={containerStyle}>
-          <div className="splash" style={splashStyle}>
-            <h1 style={{ marginBottom: '1.5rem', fontSize: '1.4rem' }}>Pista Abandonada</h1>
-            <p style={{ marginBottom: 24, fontSize: '0.95rem', color: 'var(--text-main)', lineHeight: 1.6 }}>
-              {clarification.exitLine}
-            </p>
-            <button className="btn-primary" onClick={handleCorrectionNaoSei}>
-              Encerrar esta exploração
-            </button>
-          </div>
-        </div>
-      );
-    }
-
-    return (
-      <div style={containerStyle}>
-        <div className="splash" style={splashStyle}>
-          <h1 style={{ marginBottom: '1.5rem', fontSize: '1.4rem' }}>Resumindo...</h1>
-          <div style={cardStyle}>
-            {clarification.reformulatedQuestion}
-          </div>
-          <div style={{ display: 'flex', gap: 12, marginTop: 24, justifyContent: 'center' }}>
-             <button className="btn-primary" onClick={handleSim}>Agora percebi (Faz sentido)</button>
-             <button className="btn-secondary" onClick={() => setPhase('correction_choice')}>Não faz sentido na mesma</button>
-          </div>
-        </div>
-      </div>
-    );
-  }
-
   // FASE INICIAL: CHOICE
   return (
     <div style={containerStyle}>
       <div className="splash" style={splashStyle}>
         <h1 style={{ marginBottom: '1.5rem', fontSize: '1.4rem' }}>Isto bate certo com a realidade real?</h1>
         <div style={{ display: 'flex', flexDirection: 'column', gap: 12, marginTop: 12, width: '100%' }}>
-          <button className="btn-primary" onClick={handleSim}>Sim, faz sentido (Avançar)</button>
-          <button className="btn-secondary" style={wideBtnStyle} onClick={handleParcialmente}>Parcialmente (Preciso adicionar um detalhe)</button>
-          <button className="btn-secondary" style={wideBtnStyle} onClick={handleNaoEBemIsto}>Não é bem isto (Leram mal a situação)</button>
-          <button style={abandonBtnStyle} onClick={handleNaoPercebi}>Não percebi o que disseram</button>
+          <button className="btn-primary" onClick={handleSim} disabled={isProcessing}>
+            {isProcessing ? 'A pensar...' : 'Sim, faz sentido (Avançar)'}
+          </button>
+          <button className="btn-secondary" style={wideBtnStyle} onClick={handleParcialmente} disabled={isProcessing}>
+            Parcialmente (Preciso adicionar um detalhe)
+          </button>
+          <button className="btn-secondary" style={wideBtnStyle} onClick={handleNaoEBemIsto} disabled={isProcessing}>
+            {isProcessing ? 'A rever...' : 'Não é bem isto (Leram mal a situação)'}
+          </button>
+          <button style={abandonBtnStyle} onClick={handleNaoPercebi} disabled={isProcessing}>
+            {isProcessing ? 'A reformular...' : 'Não percebi o que disseram'}
+          </button>
         </div>
       </div>
     </div>

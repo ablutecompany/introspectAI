@@ -10,18 +10,9 @@
  *
  * Render quando sessionStage === 'FOLLOW_UP_REENTRY'.
  * Apresenta sequencialmente 2–3 perguntas de follow-up.
- * Valida respostas com responseValidator antes de avançar.
- * Mostra feedback gentil se a resposta for fraca — sem bloquear brutalmente.
- */
-
 import { useState, useEffect } from 'react';
 import { useSessionStore } from '../../store/useSessionStore';
-import { classifyProgressDelta } from '../../engine/reentry/deltaEngine';
-
-import { decideCaseAdjustment, buildWorkingDirectionLine } from '../../engine/reentry/caseAdjustmentEngine';
 import { validateMinimumResponse } from '../../engine/validation/responseValidator';
-import { decideContinuationMode } from '../../engine/continuation/continuationEngine';
-import { inferReadingStageFromMemory } from '../../engine/emergentReadingEngine';
 import type { ConversationTurnOutput, ConversationTurnRequest } from '../../shared/contracts/conversationTurnContract';
 
 export function FollowUpFlow() {
@@ -188,22 +179,13 @@ export function FollowUpFlow() {
     setIsTransitioning(true);
 
     setTimeout(() => {
-      const currentState = useSessionStore.getState();
-
-      // ─── Sprint 6: Calcular delta entre sessões ────────────────────────────
-      const delta = classifyProgressDelta(responses);
-      updateProgressDelta(delta);
-
-      // ─── Sprint 6: Decidir ajuste do caso com base no delta ───────────────
-      const inference = decideCaseAdjustment(currentState, delta);
-      applyFollowUpInference(inference);
-
-      // Linha de transição para mostrar ao utilizador antes de avançar
-      const line = buildWorkingDirectionLine(inference.workingDirection);
-      setTransitionLine(line);
-
-      // ─── Transitar para o fluxo correcto ──────────────────────────────────
       setCaseStatus('active');
+
+      if (assistantText) {
+          setTransitionLine(assistantText);
+      } else {
+          setTransitionLine("A retomar o caso...");
+      }
 
       // Aguardar um momento para o utilizador ver a linha de transição
       setTimeout(() => {
