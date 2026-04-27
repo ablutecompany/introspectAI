@@ -158,7 +158,7 @@ export function FollowUpFlow() {
         setLlmTurnCount(prev => prev + 1);
 
         if (turnResult.next_action === 'proceed' || turnResult.close_session || turnResult.checkpoint_signal || llmTurnCount >= 3) {
-           handleCompleteReentry(nextAnswered, nextCorpus, turnResult.target_stage);
+           handleCompleteReentry(nextAnswered, nextCorpus, turnResult.target_stage, turnResult.assistant_text);
         } else {
            setDynamicQuestionText(turnResult.needs_clarification ? (turnResult.clarification_text || turnResult.assistant_text) : turnResult.assistant_text);
         }
@@ -184,7 +184,7 @@ export function FollowUpFlow() {
    * Calcula delta + ajuste, guarda no CaseMemory, e transita para CONTINUATION_ACTIVE.
    * Sprint 6: o ponto de integração central dos dois novos motores.
    */
-  const handleCompleteReentry = (finalAnsweredTags: string[], responses: string[], overrideTargetStage?: string | null) => {
+  const handleCompleteReentry = (finalAnsweredTags: string[], responses: string[], overrideTargetStage?: string | null, assistantText?: string) => {
     setIsTransitioning(true);
 
     setTimeout(() => {
@@ -224,7 +224,7 @@ export function FollowUpFlow() {
              shouldCloseAfterThisTurn: false,
              outputPayload: {
                  title: 'Explorar',
-                 mainText: turnResult.assistant_text || 'Vamos explorar o que trouxeste hoje. Por onde queres começar?'
+                 mainText: assistantText || 'Vamos explorar o que trouxeste hoje. Por onde queres começar?'
              }
           }
         });
