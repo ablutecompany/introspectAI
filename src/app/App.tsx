@@ -132,24 +132,32 @@ export default function App() {
   if (phase === 'TRIAGE') {
     const handleTriageComplete = (triage: TriageState) => {
       setTriageState(triage);
-      updateState({
-          phase: 'CONTINUATION_ACTIVE',
-          sessionStage: 'PROVISIONAL_FOCUS',
-          continuationState: {
-             mode: null,
-             reason: null,
-             expectedValue: null,
-             maxTurnsInMode: 5,
-             turnsUsedInMode: 0,
-             continuationResolved: false,
-             failureFlags: [],
-             shouldCloseAfterThisTurn: false,
-             outputPayload: {
-                 title: 'Explorar',
-                 mainText: 'Recebi as tuas notas. Por onde queres começar?'
-             }
-          }
-      });
+             const openingPrompts = [
+                 "Se tivesses de pegar numa ponta disto, qual seria?",
+                 "O que é que está mais vivo em ti agora?",
+                 "Por onde queres começar?",
+                 "Se começarmos pelo mais próximo, qual é?"
+             ];
+             const selectedPrompt = openingPrompts[Math.floor(Math.random() * openingPrompts.length)];
+             
+             updateState({
+                 phase: 'CONTINUATION_ACTIVE',
+                 sessionStage: 'PROVISIONAL_FOCUS',
+                 continuationState: {
+                    mode: null,
+                    reason: null,
+                    expectedValue: null,
+                    maxTurnsInMode: 5,
+                    turnsUsedInMode: 0,
+                    continuationResolved: false,
+                    failureFlags: [],
+                    shouldCloseAfterThisTurn: false,
+                    outputPayload: {
+                        title: 'Explorar',
+                        mainText: `Recebi as tuas notas. ${selectedPrompt}`
+                    }
+                 }
+             });
     };
 
     return (

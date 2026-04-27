@@ -210,7 +210,15 @@ export function FollowUpFlow() {
         const updatedState = useSessionStore.getState();
         const finalStage = overrideTargetStage || (updatedState.triageState ? 'PROVISIONAL_FOCUS' : 'ENTRY_ORIENTATION');
 
-        updateState({
+         const openingPrompts = [
+             "Se tivesses de pegar numa ponta disto, qual seria?",
+             "O que é que está mais vivo em ti agora?",
+             "Por onde queres começar?",
+             "Se começarmos pelo mais próximo, qual é?"
+         ];
+         const selectedPrompt = openingPrompts[Math.floor(Math.random() * openingPrompts.length)];
+
+         updateState({
           phase: 'CONTINUATION_ACTIVE',
           sessionStage: finalStage as any,
           continuationState: {
@@ -224,7 +232,7 @@ export function FollowUpFlow() {
              shouldCloseAfterThisTurn: false,
              outputPayload: {
                  title: 'Explorar',
-                 mainText: assistantText || 'Vamos explorar o que trouxeste hoje. Por onde queres começar?'
+                 mainText: assistantText || `Vamos explorar o que trouxeste hoje. ${selectedPrompt}`
              }
           }
         });
