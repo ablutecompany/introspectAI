@@ -3,6 +3,11 @@
  *
  * Sprint 5: Fluxo de reentrada real.
  * Sprint 6: Enriquecido com delta entre sessões.
+/**
+ * FollowUpFlow.tsx
+ *
+ * Sprint 5: Fluxo de reentrada real.
+ * Sprint 6: Enriquecido com delta entre sessões.
  *   - Classifica mudança (melhorou/piorou/stable/shifted/too_early) via deltaEngine
  *   - Decide caseAdjustment (confirm/correct/deepen/stabilize) via caseAdjustmentEngine
  *   - Guarda delta e inferência no CaseMemory
@@ -10,6 +15,7 @@
  *
  * Render quando sessionStage === 'FOLLOW_UP_REENTRY'.
  * Apresenta sequencialmente 2–3 perguntas de follow-up.
+ */
 import { useState, useEffect } from 'react';
 import { useSessionStore } from '../../store/useSessionStore';
 import { validateMinimumResponse } from '../../engine/validation/responseValidator';
