@@ -208,18 +208,27 @@ export function FollowUpFlow() {
       // Aguardar um momento para o utilizador ver a linha de transição
       setTimeout(() => {
         const updatedState = useSessionStore.getState();
-        const correctStage = inferReadingStageFromMemory(updatedState.caseMemory);
-        const contState = decideContinuationMode(updatedState);
-
-        const targetPhase = overrideTargetStage ? 'CONTINUATION_ACTIVE' : (updatedState.triageState ? 'CONTINUATION_ACTIVE' : 'TRIAGE');
-        const finalStage = overrideTargetStage || (updatedState.triageState ? correctStage : 'ENTRY_ORIENTATION');
+        const finalStage = overrideTargetStage || (updatedState.triageState ? 'PROVISIONAL_FOCUS' : 'ENTRY_ORIENTATION');
 
         updateState({
-          phase: targetPhase as any, // fallback for typing if needed
+          phase: 'CONTINUATION_ACTIVE',
           sessionStage: finalStage as any,
-          continuationState: updatedState.triageState ? contState : updatedState.continuationState,
+          continuationState: {
+             mode: null,
+             reason: null,
+             expectedValue: null,
+             maxTurnsInMode: 5,
+             turnsUsedInMode: 0,
+             continuationResolved: false,
+             failureFlags: [],
+             shouldCloseAfterThisTurn: false,
+             outputPayload: {
+                 title: 'Explorar',
+                 mainText: turnResult.assistant_text || 'Vamos explorar o que trouxeste hoje. Por onde queres começar?'
+             }
+          }
         });
-      }, 1800); // tempo suficiente para ler a linha de transição
+      }, 1800);
 
     }, 300);
   };

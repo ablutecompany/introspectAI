@@ -124,6 +124,8 @@ const buildInitialState = (): Omit<InternalState, 'schemaVersion' | 'appVersion'
       // Sprint 10B: Sinais de Correção
       lastCorrectionSignal: null,
       correctionNote: null,
+      primaryFocusProb: null,
+      rivalFoci: []
     },
     
     sessionMeta: {

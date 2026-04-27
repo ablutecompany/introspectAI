@@ -4,12 +4,6 @@ import { useVoiceController } from '../features/voice/useVoiceController';
 import { TriageFlow } from '../features/triage/TriageFlow';
 import { ReentryGate } from '../features/session/ReentryGate';
 import { FollowUpFlow } from '../features/session/FollowUpFlow';
-import { ReadingCheckpoint } from '../features/session/ReadingCheckpoint';
-import { buildLatentAndGuidanceDeterministic } from '../engine/latentGuidanceEngine';
-import { decideContinuationMode } from '../engine/continuation/continuationEngine';
-import { inferSessionStageFromLegacyPhase } from '../engine/session/phaseCompatibility';
-import { buildDiscriminationQuestion, interpretDiscriminationAnswer } from '../engine/session/discriminationEngine';
-import { buildEmergentReading, inferReadingStageFromMemory } from '../engine/emergentReadingEngine';
 import type { TriageState } from '../types/internalState';
 import type { ConversationTurnOutput, ConversationTurnRequest } from '../shared/contracts/conversationTurnContract';
 import './index.css';
@@ -20,7 +14,6 @@ export default function App() {
   const setSessionStage = useSessionStore((s) => s.setSessionStage);
   const continueExistingCase = useSessionStore((s) => s.continueExistingCase);
   const resumeAvailable = useSessionStore((s) => s.sessionMeta.resumeAvailable);
-  // Sprint 6: ligar markMeaningfulInteraction nos inputs reais de CONTINUATION_ACTIVE
   const markMeaningfulInteraction = useSessionStore((s) => s.markMeaningfulInteraction);
   const { 
     voiceState, 
@@ -36,7 +29,6 @@ export default function App() {
     const [llmStatus, setLlmStatus] = useState<'IDLE' | 'READY' | 'ERROR' | 'FALLBACK' | 'ENV_MISSING' | 'API_ERROR'>('IDLE');
   const [showTranscriptInput, setShowTranscriptInput] = useState(false);
 
-  // Derivados simples de UI de Voz
   const isListening = voiceState.status === 'listening';
   const isSpeaking = voiceState.status === 'speaking';
   const isSupported = voiceState.isSupportedSTT;
@@ -111,8 +103,6 @@ export default function App() {
     );
   };
 
-  // ─── Render: REENTRADA (caso retomável no mesmo browser) ────────────────────
-  // Mostrado antes da triagem, se existir caso válido persistido.
   if (phase === 'TRIAGE' && resumeAvailable) {
     return (
       <div style={{ minHeight: '100vh', background: 'var(--bg-color)', position: 'relative' }}>
@@ -130,7 +120,6 @@ export default function App() {
     );
   }
 
-  // ─── Render: FOLLOW_UP_REENTRY (reentrada real — não volta à triagem) ────────
   if (sessionStage === 'FOLLOW_UP_REENTRY') {
     return (
       <div style={{ minHeight: '100vh', background: 'var(--bg-color)', position: 'relative' }}>
@@ -140,11 +129,27 @@ export default function App() {
     );
   }
 
-  // ─── Render: TRIAGE (nova exploração) ────────────────────────────────────────
   if (phase === 'TRIAGE') {
     const handleTriageComplete = (triage: TriageState) => {
       setTriageState(triage);
-      // O componente transita agora atomicamente para LATENT_READING_DISPLAY no Store
+      updateState({
+          phase: 'CONTINUATION_ACTIVE',
+          sessionStage: 'PROVISIONAL_FOCUS',
+          continuationState: {
+             mode: null,
+             reason: null,
+             expectedValue: null,
+             maxTurnsInMode: 5,
+             turnsUsedInMode: 0,
+             continuationResolved: false,
+             failureFlags: [],
+             shouldCloseAfterThisTurn: false,
+             outputPayload: {
+                 title: 'Explorar',
+                 mainText: 'Recebi as tuas notas. Por onde queres começar?'
+             }
+          }
+      });
     };
 
     return (
@@ -156,109 +161,7 @@ export default function App() {
     );
   }
 
-  // ─── Render: READING (Provisória ou Emergente) ──────────────────────────────
-  if (phase === 'LATENT_READING_DISPLAY') {
-    const currentState = useSessionStore.getState();
 
-    // Sprint 4: Tentar gerar leitura emergente se o caso tiver maturidade
-    const emergentOutput = buildEmergentReading(currentState);
-    const motorOutput = emergentOutput ? null : buildLatentAndGuidanceDeterministic(currentState);
-    
-    const handleProceed = () => {
-      stopSpeaking();
-      const state = useSessionStore.getState();
-      
-      // Sprint 8: Em Leitura Emergente, não vamos logo para a orientação de trabalho.
-      // Paramos no ReadingCheckpoint para confirmar se a leitura bate certo.
-      if (emergentOutput) {
-        setSessionStage('READING_CHECKPOINT');
-        return;
-      }
-
-      // Sprint 4: Se for hipótese provisória, avança normalmente.
-      const correctStage = inferReadingStageFromMemory(state.caseMemory);
-      const contState = decideContinuationMode(state);
-      
-      updateState({ 
-         phase: 'CONTINUATION_ACTIVE', 
-         sessionStage: correctStage,
-         continuationState: contState 
-      });
-    };
-
-    // ─── Render: READING CHECKPOINT (Sprint 8) ────────────────────────────────
-    if (emergentOutput && sessionStage === 'READING_CHECKPOINT') {
-      const handleCheckpointProceed = () => {
-         const state = useSessionStore.getState();
-         const correctStage = inferReadingStageFromMemory(state.caseMemory);
-         const contState = decideContinuationMode(state);
-         
-         updateState({ 
-            phase: 'CONTINUATION_ACTIVE', 
-            sessionStage: correctStage,
-            continuationState: contState 
-         });
-      };
-
-      return (
-        <ReadingCheckpoint onProceed={handleCheckpointProceed} />
-      );
-    }
-
-    // ─── Render: LEITURA EMERGENTE (com maturidade) ──────────────────────────
-    if (emergentOutput) {
-      return (
-        <div style={{ minHeight: '100vh', background: 'var(--bg-color)', position: 'relative' }}>
-          {renderVoiceToggle()}
-          <div className="container" style={{ padding: '0 2rem' }}>
-            <div className="splash" style={{ maxWidth: 640 }}>
-              <h1 style={{ marginBottom: '1.5rem', fontSize: '1.4rem' }}>{emergentOutput.title}</h1>
-              
-              <div style={{ textAlign: 'left', background: 'var(--bg-card)', border: '1px solid var(--border-color)', borderRadius: 12, padding: 24, fontSize: '0.95rem', lineHeight: 1.7, color: 'var(--text-main)', marginBottom: 24 }}>
-                <p style={{ margin: '0 0 20px 0' }}>
-                  {emergentOutput.readingParagraph}
-                </p>
-                <p style={{ margin: 0, fontSize: '0.9rem', color: 'var(--text-muted)', borderTop: '1px solid var(--border-color)', paddingTop: 16 }}>
-                  {emergentOutput.lightGuidance}
-                </p>
-              </div>
-
-              <button className="btn-primary" style={{ marginTop: 20 }} onClick={handleProceed}>
-                Continuar
-              </button>
-            </div>
-          </div>
-        </div>
-      );
-    }
-
-    // ─── Render: HIPÓTESE PROVISÓRIA (sem maturidade suficiente ainda) ────────
-    return (
-      <div style={{ minHeight: '100vh', background: 'var(--bg-color)', position: 'relative' }}>
-        {renderVoiceToggle()}
-        <div className="container" style={{ padding: '0 2rem' }}>
-          <div className="splash" style={{ maxWidth: 640 }}>
-            <h1 style={{ marginBottom: '1.5rem', fontSize: '1.4rem' }}>Hipótese Provisória</h1>
-            
-            <div style={{ textAlign: 'left', background: 'var(--accent-base)', border: '1px solid var(--border-color)', borderRadius: 12, padding: 24, fontSize: '0.95rem', lineHeight: 1.7, color: 'var(--text-main)', marginBottom: 24 }}>
-              <p style={{ margin: '0 0 16px 0', color: 'var(--text-muted)' }}>
-                {motorOutput?.provisionalHypothesisParagraph}
-              </p>
-              {motorOutput?.needsDiscrimination && (
-                 <div style={{ marginTop: 12, paddingTop: 12, borderTop: '1px dashed rgba(255,255,255,0.2)', fontSize: '0.85rem', color: 'var(--text-muted)' }}>
-                    <em>Nota: Foco partilhado ou difuso. Será útil discriminar a causa raiz de seguida.</em>
-                 </div>
-              )}
-            </div>
-
-            <button className="btn-primary" style={{ marginTop: 20 }} onClick={handleProceed}>
-              Explorar Padrão de Fricção
-            </button>
-          </div>
-        </div>
-      </div>
-    );
-  }
 
   // ─── Render: CONTINUATION & CLOSE ───────────────────────────────────────────
   if (phase === 'CONTINUATION_ACTIVE' || phase === 'CLOSE_NOW') {
@@ -285,25 +188,16 @@ export default function App() {
 
        const forceCloseSession = (reasonText: string) => {
           setTimeout(() => {
-            const forceCloseState = decideContinuationMode({
-               ...useSessionStore.getState(),
-               governance: { ...useSessionStore.getState().governance, shouldCloseNow: true, lastGovernanceReason: reasonText },
-               continuationState: {
-                  ...useSessionStore.getState().continuationState,
-                  continuationResolved: true,
-                  turnsUsedInMode: 1
-               }
-            });
-            
             updateState({ 
                phase: 'CLOSE_NOW', 
-               sessionStage: inferSessionStageFromLegacyPhase('CLOSE_NOW'),
-               continuationState: forceCloseState 
+               sessionStage: 'WORK_ASSIGNMENT',
+               continuationState: {
+                   ...useSessionStore.getState().continuationState,
+                   shouldCloseAfterThisTurn: true,
+                   continuationResolved: true
+               }
             });
-            
-            setInputText('');
-            setIsProcessing(false);
-          }, 300);
+          }, 400);
        };
 
        if (shortcutMode === 'close' || shortcutMode === 'refute') {
@@ -368,22 +262,42 @@ export default function App() {
                memoryUpdate.confidenceState = 'insufficient';
            }
 
+           if (turnResult.focus_probabilities) {
+               const probs = turnResult.focus_probabilities;
+               const sortedFoci = Object.entries(probs).sort((a, b) => b[1] - a[1]);
+               const primary = sortedFoci[0];
+               if (primary && primary[1] > 0.3) {
+                   memoryUpdate.primaryFocusProb = primary[1];
+                   if (!memoryUpdate.currentFocus) {
+                       memoryUpdate.currentFocus = primary[0];
+                   }
+                   
+                   memoryUpdate.rivalFoci = sortedFoci
+                       .slice(1)
+                       .filter(f => f[1] > 0.3 && (primary[1] - f[1]) < 0.25)
+                       .map(f => f[0]);
+               }
+           }
+
            if (Object.keys(memoryUpdate).length > 0) {
                useSessionStore.getState().updateCaseMemory(memoryUpdate);
            }
 
            markMeaningfulInteraction();
 
-           if (turnResult.close_session) {
-               forceCloseSession('Sessão fechada após análise LLM.');
-               return;
-           }
-
-           if (turnResult.next_action === 'proceed' || turnResult.checkpoint_signal || turnResult.target_stage === 'READING_CHECKPOINT') {
-               updateState({ 
-                   phase: 'LATENT_READING_DISPLAY', 
-                   sessionStage: 'READING_CHECKPOINT'
+           if (turnResult.next_action === 'assign_work' || turnResult.close_session) {
+               updateState({
+                   phase: 'CLOSE_NOW',
+                   sessionStage: 'WORK_ASSIGNMENT',
                });
+               
+               if (turnResult.concrete_task) {
+                   const memoryUpdate: Partial<typeof currentState.caseMemory> = {
+                       assignedWork: `AÇÃO: ${turnResult.concrete_task.action}\nDURAÇÃO: ${turnResult.concrete_task.duration}\nGATILHO: ${turnResult.concrete_task.trigger}\nOBSERVAR: ${turnResult.concrete_task.observable}`
+                   };
+                   useSessionStore.getState().updateCaseMemory(memoryUpdate);
+               }
+               
                setInputText('');
                setIsProcessing(false);
                return;
@@ -394,7 +308,10 @@ export default function App() {
                   ...continuationState!,
                   outputPayload: {
                       ...continuationState!.outputPayload!,
-                      optionalPrompt: (turnResult.assistant_text.includes("[FALLBACK") || turnResult.assistant_text.includes("[DEBUG]")) ? turnResult.assistant_text : (turnResult.needs_clarification ? (turnResult.clarification_text || turnResult.assistant_text) : turnResult.assistant_text)
+                      title: 'Explorar',
+                      mainText: turnResult.needs_clarification ? (turnResult.clarification_text || turnResult.assistant_text) : turnResult.assistant_text,
+                      optionalPrompt: undefined,
+                      closingText: undefined
                   }
               }
            });
@@ -442,16 +359,8 @@ export default function App() {
                 )}
               </div>
             
-            <div style={{ textAlign: 'left', background: 'var(--bg-card)', border: '1px solid var(--border-color)', borderRadius: 12, padding: 24, fontSize: '0.95rem', lineHeight: 1.7, color: 'var(--text-main)', marginBottom: 24 }}>
-              <p style={{ margin: '0 0 16px 0' }}>{p.mainText}</p>
-              
-              {p.optionalPrompt && (
-                <p style={{ margin: '16px 0 0 0', fontWeight: 500, color: 'var(--accent-text)' }}>{p.optionalPrompt}</p>
-              )}
-
-              {p.closingText && (
-                <p style={{ margin: '16px 0 0 0', fontWeight: 500, color: 'var(--text-muted)' }}>{p.closingText}</p>
-              )}
+            <div style={{ textAlign: 'left', background: 'var(--bg-card)', border: '1px solid var(--border-color)', borderRadius: 12, padding: 24, fontSize: '1.05rem', lineHeight: 1.7, color: 'var(--text-main)', marginBottom: 24 }}>
+              <p style={{ margin: 0 }}>{p.mainText}</p>
             </div>
 
             {requiresInteraction && (
@@ -531,15 +440,22 @@ export default function App() {
               </div>
             )}
             
-            {/* Fim Absoluto da Sessão */}
+            {/* Fim Absoluto da Sessão - Fecho Dinâmico */}
             {!requiresInteraction && (
-               <div style={{ marginTop: 24, padding: 16, borderTop: '1px solid var(--border-color)', color: 'var(--text-muted)', fontSize: '0.9rem' }}>
-                 A sessão está fechada. Leva a leitura e aplica o exercício offline.<br/><br/>
-                 <button onClick={() => {
-                   useSessionStore.getState().startFreshCase();
-                 }} className="btn-primary" style={{ marginTop: 12, background: 'var(--border-color)', color: 'white' }}>
-                   Começar nova exploração
-                 </button>
+               <div style={{ marginTop: 24, padding: 24, background: 'var(--bg-card)', border: '1px solid var(--accent-base)', borderRadius: 12, color: 'var(--text-main)', fontSize: '0.95rem' }}>
+                 <h2 style={{ fontSize: '1.1rem', marginBottom: 16, color: 'var(--accent-text)', display: 'flex', alignItems: 'center', gap: 8 }}>
+                   <span>🎯</span> O Teu Ponto de Trabalho
+                 </h2>
+                 <div style={{ background: 'rgba(0,0,0,0.2)', padding: 16, borderRadius: 8, whiteSpace: 'pre-wrap', fontFamily: 'monospace', fontSize: '0.85rem', lineHeight: 1.6 }}>
+                   {useSessionStore.getState().caseMemory.assignedWork || "Nenhuma tarefa atribuída nesta sessão."}
+                 </div>
+                 <div style={{ marginTop: 20, textAlign: 'center' }}>
+                   <button onClick={() => {
+                     useSessionStore.getState().startFreshCase();
+                   }} className="btn-primary" style={{ background: 'var(--border-color)', color: 'white' }}>
+                     Fechar e Iniciar Nova Exploração
+                   </button>
+                 </div>
                </div>
             )}
           </div>

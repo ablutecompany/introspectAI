@@ -313,6 +313,12 @@ export interface CaseMemory {
   lastCorrectionSignal: string | null;
   /** Registo da última correção aplicada ao foco ou hipótese */
   correctionNote: string | null;
+
+  // ─── Sprint 11: Pivot Estratégico (Rastreio de Foco Probabilístico) ──────────
+  /** Probabilidade atual do foco principal */
+  primaryFocusProb: number | null;
+  /** Lista de focos rivais que competem pela raiz do problema */
+  rivalFoci: string[];
 }
 
 
