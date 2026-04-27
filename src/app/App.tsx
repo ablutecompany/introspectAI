@@ -182,31 +182,17 @@ export default function App() {
     const isClosing = phase === 'CLOSE_NOW' || continuationState.shouldCloseAfterThisTurn;
     const requiresInteraction = !isClosing;
 
-    // A resposta encerra a aplicação liminarmente (Bypass de Loops Infinitos LLM)
     const submitResponse = async (shortcutMode?: 'close' | 'refute') => {
-       const userText = inputText.trim() || transcript.trim();
-       useSessionStore.getState().saveSnapshot(userText);
-
-       const forceCloseSession = (reasonText: string) => {
-          setTimeout(() => {
-            updateState({ 
-               phase: 'CLOSE_NOW', 
-               sessionStage: 'WORK_ASSIGNMENT',
-               continuationState: {
-                   ...useSessionStore.getState().continuationState,
-                   shouldCloseAfterThisTurn: true,
-                   continuationResolved: true
-               }
-            });
-          }, 400);
-       };
-
-       if (shortcutMode === 'close' || shortcutMode === 'refute') {
-          forceCloseSession('Sessão encerrada pelo utilizador (' + shortcutMode + ').');
-          return;
+       let userText = inputText.trim() || transcript.trim();
+       
+       if (shortcutMode === 'close') {
+           userText = "Não quero responder a esta pergunta. Prefiro explorar outra via ou encerrar a sessão com uma tarefa prática.";
+       } else if (shortcutMode === 'refute') {
+           userText = "Não é bem isso. Acho que a tua leitura ou foco não estão certos.";
        }
 
        if (!userText) return;
+       useSessionStore.getState().saveSnapshot(userText);
 
        setIsProcessing(true);
        stopListening();
@@ -444,12 +430,20 @@ export default function App() {
             {/* Fim Absoluto da Sessão - Fecho Dinâmico */}
             {!requiresInteraction && (
                <div style={{ marginTop: 24, padding: 24, background: 'var(--bg-card)', border: '1px solid var(--accent-base)', borderRadius: 12, color: 'var(--text-main)', fontSize: '0.95rem' }}>
-                 <h2 style={{ fontSize: '1.1rem', marginBottom: 16, color: 'var(--accent-text)', display: 'flex', alignItems: 'center', gap: 8 }}>
-                   <span>🎯</span> O Teu Ponto de Trabalho
-                 </h2>
-                 <div style={{ background: 'rgba(0,0,0,0.2)', padding: 16, borderRadius: 8, whiteSpace: 'pre-wrap', fontFamily: 'monospace', fontSize: '0.85rem', lineHeight: 1.6 }}>
-                   {useSessionStore.getState().caseMemory.assignedWork || "Nenhuma tarefa atribuída nesta sessão."}
-                 </div>
+                 {useSessionStore.getState().caseMemory.assignedWork ? (
+                   <>
+                     <h2 style={{ fontSize: '1.1rem', marginBottom: 16, color: 'var(--accent-text)', display: 'flex', alignItems: 'center', gap: 8 }}>
+                       <span>🎯</span> O Teu Ponto de Trabalho
+                     </h2>
+                     <div style={{ background: 'rgba(0,0,0,0.2)', padding: 16, borderRadius: 8, whiteSpace: 'pre-wrap', fontFamily: 'monospace', fontSize: '0.85rem', lineHeight: 1.6 }}>
+                       {useSessionStore.getState().caseMemory.assignedWork}
+                     </div>
+                   </>
+                 ) : (
+                   <div style={{ textAlign: 'center', color: 'var(--text-muted)', marginBottom: 16 }}>
+                     A sessão foi encerrada sem tarefa atribuída.
+                   </div>
+                 )}
                  <div style={{ marginTop: 20, textAlign: 'center' }}>
                    <button onClick={() => {
                      useSessionStore.getState().startFreshCase();
