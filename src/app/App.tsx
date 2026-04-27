@@ -184,15 +184,21 @@ export default function App() {
 
     const submitResponse = async (shortcutMode?: 'close' | 'refute') => {
        let userText = inputText.trim() || transcript.trim();
+       let actionType: ConversationTurnRequest['user_action_type'] = 'normal_text_input';
        
        if (shortcutMode === 'close') {
-           userText = "Não quero responder a esta pergunta. Prefiro explorar outra via ou encerrar a sessão com uma tarefa prática.";
+           userText = "";
+           actionType = 'shortcut_refusal';
        } else if (shortcutMode === 'refute') {
-           userText = "Não é bem isso. Acho que a tua leitura ou foco não estão certos.";
+           userText = "";
+           actionType = 'shortcut_disagreement';
        }
 
-       if (!userText) return;
-       useSessionStore.getState().saveSnapshot(userText);
+       if (!userText && !shortcutMode) return;
+       
+       if (actionType === 'normal_text_input') {
+           useSessionStore.getState().saveSnapshot(userText);
+       }
 
        setIsProcessing(true);
        stopListening();
@@ -211,7 +217,9 @@ export default function App() {
                checkpointState: null,
                conversationDepth: currentState.sessionMeta.turnCount,
                previousCorrections: [],
-               salientTerms: currentState.caseMemory.salientTerms || []
+               salientTerms: currentState.caseMemory.salientTerms || [],
+               user_action_type: actionType,
+               user_action_payload: shortcutMode === 'close' ? 'redirect_or_close' : undefined
            };
 
            const res = await fetch('/api/conversationTurn', {

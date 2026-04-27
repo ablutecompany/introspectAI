@@ -50,4 +50,6 @@ export interface ConversationTurnRequest {
   previousCorrections: string[];
   salientTerms: string[];
   constraints?: string[];
+  user_action_type?: 'normal_text_input' | 'shortcut_refusal' | 'shortcut_disagreement' | 'shortcut_partial' | 'shortcut_clarification_request' | string;
+  user_action_payload?: string;
 }

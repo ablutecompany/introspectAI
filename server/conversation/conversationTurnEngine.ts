@@ -39,12 +39,18 @@ ESTADO ATUAL:
 - Current Hypothesis: ${request.currentHypothesis || 'Nenhuma'}
 - Last Assistant Turn: ${request.lastAssistantTurn || 'Nenhum'}
 - Correções passadas: ${request.previousCorrections?.length ? request.previousCorrections.join(' | ') : 'Nenhuma'}
+- User Action Type: ${request.user_action_type || 'normal_text_input'}
+- User Action Payload: ${request.user_action_payload || 'none'}
 
 OS 4 MODOS OPERACIONAIS (Deves inferir em que modo estás e declará-lo em current_mode):
 1. LOCALIZAR_FOCO: Abertura. Deixa a conversa fluir. Faz perguntas abertas e curtas. Mapeia probabilidades internamente.
 2. AFINAR_FOCO: Só entra aqui se houver 2 focos rivais fortes. Faz uma pergunta discriminatória clara (ex: "Sentes mais peso por X ou evitas Y?").
 3. APROFUNDAR_FOCO: Quando o foco é claro. Pergunta pelo que mantém o problema ativo, custos ou padrões.
 4. FECHO_DINAMICO: Fim da sessão. Emite next_action="assign_work" e preenche o objecto concrete_task com uma tarefa estritamente acionável.
+
+EVENTOS ESPECIAIS (User Action Type):
+- "shortcut_refusal": O utilizador NÃO QUER responder à tua última pergunta ou seguir essa via. Muda de direção imediatamente (oferece alternativas de exploração) ou transita para FECHO_DINAMICO com uma tarefa pequena e útil. NUNCA repitas a pergunta.
+- "shortcut_disagreement": O utilizador diz que a tua leitura/foco está errada. Recua, pede desculpa e pede-lhe para reorientar a conversa.
 
 REGRAS GERAIS:
 1. Responde em PT-PT natural. Sem estilo coach. Sem banalidades.
@@ -91,7 +97,7 @@ IMPORTANTE: Responde EXCLUSIVAMENTE em formato JSON validando o schema:
         model: 'gpt-4o-mini',
         messages: [
           { role: 'system', content: systemPrompt },
-          { role: 'user', content: request.lastUserInput || '' },
+          { role: 'user', content: request.lastUserInput || `[EVENTO: ${request.user_action_type || 'normal_text_input'}]` },
         ],
         response_format: { type: 'json_object' },
         temperature: 0.1,
@@ -112,6 +118,31 @@ IMPORTANTE: Responde EXCLUSIVAMENTE em formato JSON validando o schema:
       
       const isTimeout = error.code === 'ETIMEDOUT' || error.name === 'TimeoutError';
       
+      if (request.user_action_type === 'shortcut_refusal' || request.user_action_type === 'shortcut_disagreement') {
+        return {
+          assistant_text: "Tive uma falha técnica ao redirecionar. Vamos fechar por agora com um exercício simples.",
+          user_input_interpretation: "Fallback evento",
+          understanding_status: "insufficient",
+          current_mode: "FECHO_DINAMICO",
+          focus_probabilities: { trabalho_dinheiro: 0, relacao_perda_solidao: 0, corpo_energia_sono: 0, decisao_evitamento: 0, sentido_rumo_vazio: 0, misto_difuso: 0 },
+          next_action: "assign_work",
+          target_stage: null,
+          updated_focus: null,
+          updated_hypothesis: null,
+          needs_clarification: false,
+          clarification_text: null,
+          close_session: true,
+          concrete_task: {
+            action: "Pausa estruturada",
+            duration: "Hoje",
+            trigger: "Quando o foco voltar a surgir",
+            observable: "Regista a hora e o que sentiste no corpo"
+          },
+          suggested_ui_mode: 'normal',
+          suggested_shortcuts: []
+        };
+      }
+
       return {
         assistant_text: `[FALLBACK ENGINE] Erro: ${error.message || 'Erro desconhecido'}`,
         user_input_interpretation: "Erro Engine",
