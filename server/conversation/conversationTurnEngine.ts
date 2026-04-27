@@ -21,7 +21,10 @@ export class ConversationTurnEngine {
     const OpenAIClass = (OpenAI as any).default || OpenAI;
     this.openai = new OpenAIClass({
       apiKey: apiKey || process.env.OPENAI_API_KEY,
-    }  public async processTurn(request: ConversationTurnRequest): Promise<ConversationTurnOutput> {
+    });
+  }
+
+  public async processTurn(request: ConversationTurnRequest): Promise<ConversationTurnOutput> {
     const phaseInstructions = this.getPhaseInstructions(request.sessionStage);
 
     const systemPrompt = `
@@ -35,7 +38,7 @@ ESTADO ATUAL:
 - Current Focus: ${request.currentFocus || 'Nenhum'}
 - Current Hypothesis: ${request.currentHypothesis || 'Nenhuma'}
 - Last Assistant Turn: ${request.lastAssistantTurn || 'Nenhum'}
-- Correções passadas: ${request.previousCorrections?.length > 0 ? request.previousCorrections.join(' | ') : 'Nenhuma'}
+- Correções passadas: ${request.previousCorrections?.length ? request.previousCorrections.join(' | ') : 'Nenhuma'}
 
 OS 4 MODOS OPERACIONAIS (Deves inferir em que modo estás e declará-lo em current_mode):
 1. LOCALIZAR_FOCO: Abertura. Deixa a conversa fluir. Faz perguntas abertas e curtas. Mapeia probabilidades internamente.
@@ -81,28 +84,28 @@ IMPORTANTE: Responde EXCLUSIVAMENTE em formato JSON validando o schema:
 `.trim();
 
     try {
-      console.log(`[LLM Engine] Chamando OpenAI (gpt-4o-mini)... Stage: ${request.sessionStage}`);
+      console.log(\`[LLM Engine] Chamando OpenAI (gpt-4o-mini)... Stage: \${request.sessionStage}\`);
       const llmStart = Date.now();
       
       const completion = await this.openai.chat.completions.create({
         model: 'gpt-4o-mini',
         messages: [
           { role: 'system', content: systemPrompt },
-          { role: 'user', content: request.lastUserInput },
+          { role: 'user', content: request.lastUserInput || '' },
         ],
         response_format: { type: 'json_object' },
         temperature: 0.1,
       });
 
       const llmDuration = Date.now() - llmStart;
-      const rawContent = completion.choices[0]?.message.content;
+      const rawContent = completion.choices[0]?.message?.content;
 
       if (!rawContent) {
         throw new Error('OpenAI retornou conteúdo vazio.');
       }
 
       const parsedOutput = ConversationTurnOutputSchema.parse(JSON.parse(rawContent));
-      console.log(`[LLM Engine] Resposta processada em ${llmDuration}ms. Action: ${parsedOutput.next_action}, Mode: ${parsedOutput.current_mode}`);
+      console.log(\`[LLM Engine] Resposta processada em \${llmDuration}ms. Action: \${parsedOutput.next_action}, Mode: \${parsedOutput.current_mode}\`);
       return parsedOutput;
     } catch (error: any) {
       console.error('[LLM Engine] Erro de API/Parsing:', error);
@@ -145,9 +148,6 @@ IMPORTANTE: Responde EXCLUSIVAMENTE em formato JSON validando o schema:
         return "- MODO 4: FECHO_DINAMICO obrigatoriamente. Cria uma tarefa objetiva, quantificável e temporal. Despede-te brevemente.";
       default:
         return "- Mantém o modo focado e avança progressivamente.";
-    }
-  }
-}�da e ajusta-te ao utilizador.";
     }
   }
 }
