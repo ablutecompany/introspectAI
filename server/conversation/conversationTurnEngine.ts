@@ -84,7 +84,7 @@ IMPORTANTE: Responde EXCLUSIVAMENTE em formato JSON validando o schema:
 `.trim();
 
     try {
-      console.log(\`[LLM Engine] Chamando OpenAI (gpt-4o-mini)... Stage: \${request.sessionStage}\`);
+      console.log(`[LLM Engine] Chamando OpenAI (gpt-4o-mini)... Stage: ${request.sessionStage}`);
       const llmStart = Date.now();
       
       const completion = await this.openai.chat.completions.create({
@@ -105,7 +105,7 @@ IMPORTANTE: Responde EXCLUSIVAMENTE em formato JSON validando o schema:
       }
 
       const parsedOutput = ConversationTurnOutputSchema.parse(JSON.parse(rawContent));
-      console.log(\`[LLM Engine] Resposta processada em \${llmDuration}ms. Action: \${parsedOutput.next_action}, Mode: \${parsedOutput.current_mode}\`);
+      console.log(`[LLM Engine] Resposta processada em ${llmDuration}ms. Action: ${parsedOutput.next_action}, Mode: ${parsedOutput.current_mode}`);
       return parsedOutput;
     } catch (error: any) {
       console.error('[LLM Engine] Erro de API/Parsing:', error);
@@ -113,7 +113,7 @@ IMPORTANTE: Responde EXCLUSIVAMENTE em formato JSON validando o schema:
       const isTimeout = error.code === 'ETIMEDOUT' || error.name === 'TimeoutError';
       
       return {
-        assistant_text: \`[FALLBACK ENGINE] Erro: \${error.message || 'Erro desconhecido'}\`,
+        assistant_text: `[FALLBACK ENGINE] Erro: ${error.message || 'Erro desconhecido'}`,
         user_input_interpretation: "Erro Engine",
         understanding_status: "insufficient",
         current_mode: "LOCALIZAR_FOCO",
