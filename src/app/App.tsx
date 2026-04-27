@@ -179,7 +179,8 @@ export default function App() {
        );
     }
 
-    const requiresInteraction = p.optionalPrompt && !continuationState.shouldCloseAfterThisTurn;
+    const isClosing = phase === 'CLOSE_NOW' || continuationState.shouldCloseAfterThisTurn;
+    const requiresInteraction = !isClosing;
 
     // A resposta encerra a aplicação liminarmente (Bypass de Loops Infinitos LLM)
     const submitResponse = async (shortcutMode?: 'close' | 'refute') => {
@@ -392,7 +393,7 @@ export default function App() {
                     </button>
 
                     <button className="btn-primary" onClick={() => submitResponse()} disabled={isProcessing || (!inputText.trim() && !transcript.trim())}>
-                       Responder & Fechar
+                       Responder
                     </button>
 
                     <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap', justifyContent: 'center', width: '100%', marginTop: 12 }}>
